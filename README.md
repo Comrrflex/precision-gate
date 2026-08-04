@@ -53,12 +53,80 @@ It does not replace human judgment, institutional authority, legal review, medic
 
 ## First implementation direction
 
-The first version should define:
+The reference implementation now defines:
 
-- custody states;
-- product boundaries;
-- non-abandonment principles for TCRIA;
-- adapters for TCRIA audit bundle and API output;
-- adapter to Quinta Ordem `ExecutionContext`;
-- reports that show what was supported, pending, blocked, returned, inferred, or human-review required;
-- metrics for operational precision and release safety.
+- immutable, versioned custody events;
+- an append-only SHA-256 receipt chain;
+- strict adapters for the official TCRIA audit bundle, external API output, and Quinta
+  Ordem contracts;
+- deterministic coherence alerts;
+- monotonic block, read-failure, and human-review requirements;
+- final-only JSON, Markdown, and manifest artifacts;
+- observed validation metrics for operational precision and release safety.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    T[TCRIA official audit bundle] -->|reference + SHA-256| P[Precision custody trail]
+    A[External AI/API output] -->|provider-neutral envelope| P
+    P -->|ExecutionContext v1.0| Q[Quinta Ordem Gate]
+    Q -->|GateDecision v1.0| P
+    P --> C[Deterministic coherence assessment]
+    C --> H[Human review]
+    H --> R[Final derived report + manifest]
+```
+
+Precision Gate never reads a path from a TCRIA bundle to reopen original evidence. It
+does not invoke an AI provider. It does not copy TCRIA or Quinta Ordem decision logic.
+Each product remains independently governed.
+
+## Runtime modules
+
+| Module | Responsibility |
+|---|---|
+| `contracts.py` | Versioned states, source references, immutable events, promotion guards |
+| `ledger.py` | Canonical event serialization, SHA-256 receipts, chain verification |
+| `tcria_adapter.py` | Strict observation of a completed official TCRIA audit bundle |
+| `api_output_adapter.py` | Provider-neutral observation of external AI/API output |
+| `quinta_adapter.py` | Quinta `ExecutionContext` handoff and `GateDecision` ingestion |
+| `coherence.py` | Deterministic divergence, omission, promotion, and custody alerts |
+| `pipeline.py` | Explicit external handoff and human-review stages |
+| `reporting.py` | Final consolidated JSON/Markdown report and manifest |
+| `metrics.py` | Labeled-case operational validation metrics |
+
+## Release semantics
+
+`released` means that an output is eligible for delivery to the responsible human or
+institutional flow. It requires:
+
+1. an `APPROVED` Quinta Ordem result;
+2. completed human review with an accepted outcome;
+3. no unresolved block, read failure, review requirement, or coherence conflict;
+4. a valid append-only custody chain.
+
+It does not mean that Precision Gate decided a right, legal responsibility, medical
+question, credit outcome, liberty interest, or other material consequence.
+
+## External API boundary
+
+The first implementation deliberately keeps AI/API execution outside Precision Gate.
+The adapter accepts only a versioned envelope containing input references, provider/model
+metadata, prompt reference or hash, output reference/hash, output nature, and optional
+claim relations. It neither requests nor stores hidden chain-of-thought.
+
+## Validation
+
+```bash
+python -m pip install -e ".[dev]"
+pytest
+ruff check .
+```
+
+The default `0.95` validation target is measured over labeled cases with explicit
+numerators, denominators, and sample sizes. A metric with no eligible cases is
+`not_evaluated`, never an artificial 100%.
+
+See [`docs/PRODUCT_ARCHITECTURE.md`](docs/PRODUCT_ARCHITECTURE.md),
+[`docs/INTEGRATION_CONTRACTS.md`](docs/INTEGRATION_CONTRACTS.md), and
+[`docs/CHAIN_OF_CUSTODY.md`](docs/CHAIN_OF_CUSTODY.md) for the complete contract.
