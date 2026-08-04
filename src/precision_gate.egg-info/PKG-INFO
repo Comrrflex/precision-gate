@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: precision-gate
+Version: 0.1.0
+Summary: Mobile custody and operational precision layer for TCRIA and Quinta Ordem Gate
+Requires-Python: >=3.11
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: ruff>=0.6; extra == "dev"
