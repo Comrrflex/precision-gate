@@ -2,59 +2,23 @@
 
 > Mobile custody and operational precision layer for TCRIA + Quinta Ordem Gate.
 
-Precision Gate is a third product. It is not a copy of TCRIA, not a replacement for Quinta Ordem Gate, not an API wrapper, and not an autonomous decision-maker.
+Precision Gate is a new product. It is not a copy of TCRIA, not a replacement for Quinta Ordem Gate, and not an autonomous decision-maker.
 
-It is a **mobile custody, precision, alert, and reporting layer** that follows information as it moves through an audit trail, preserving provenance, state, support, warnings, gate decisions, and human-review requirements.
-
-## Current status
-
-The repository now contains an executable first implementation of the architecture described in this manual:
-
-- mobile information and custody states;
-- TCRIA audit-bundle adapter;
-- external AI/API output adapter;
-- Quinta Ordem `ExecutionContext` payload adapter;
-- Quinta Ordem `GateDecision` ingestion;
-- orchestration pipeline that does not take the final decision;
-- transparent operational metrics;
-- consolidated Markdown reporting;
-- eight derived Markdown report views;
-- automated tests and CI.
-
-This is an **initial integration implementation**, not a claim of complete empirical validation. Real-case, adversarial, scale, and independent validation remain necessary before consequential production use.
+It is a **mobile custody reference layer** that follows information as it moves through an audit trail, preserving provenance, state, support, warnings, gate decisions, and human-review requirements.
 
 ## Core idea
 
 Precision Gate tracks outputs from:
 
-- **TCRIA**, as the informational producer and governance/audit organizer;
-- **Quinta Ordem Gate**, as the deterministic verification engine;
-- **API outputs**, when an external model or service produces a synthesis, opinion, inference, institutional output, or final text.
+- TCRIA, as the informational producer and governance/audit organizer;
+- Quinta Ordem Gate, as the deterministic verification engine;
+- API outputs, when an external model or service produces a synthesis, opinion, institutional output, or final text.
 
 Its job is to preserve the trail and point to where operational truth is best supported.
 
-It does not force a decision. The final decision remains human.
+It does not force a decision.
 
-## Product flow
-
-```text
-TCRIA audit bundle
-    -> Precision TCRIA adapter
-    -> classified mobile-custody events
-
-AI/API output
-    -> Precision API adapter
-    -> opinion, inference, pending, null, or explicitly supported fact
-
-Precision events
-    -> Quinta Ordem ExecutionContext payload
-    -> Quinta Ordem deterministic evaluation
-    -> findings, status, confidence, uncertainty, and human review
-
-All classified events
-    -> Precision metrics, alerts, and Markdown reports
-    -> human decision
-```
+The final decision remains human.
 
 ## Golden rule
 
@@ -66,177 +30,103 @@ The flow may continue through nulls, opinions, hypotheses, warnings, signals, pe
 
 If OCR or evidence extraction fails, the system must not pretend that the evidence was read. The trail may continue as a failure record, but the content cannot be promoted as reliable textual evidence.
 
-## Implemented package
-
-```text
-src/precision_gate/
-├── __init__.py
-├── custody_state.py       # mobile information and custody states
-├── tcria_adapter.py       # TCRIA audit bundle -> Precision events
-├── api_output_adapter.py  # AI/API output -> classified Precision event
-├── quinta_adapter.py      # Precision events <-> Quinta Ordem contracts
-├── pipeline.py            # orchestration without final decision authority
-├── metrics.py             # operational precision and release-safety metrics
-└── reporting.py           # consolidated and categorized Markdown reports
-```
-
-## Quick start
-
-Requirements:
-
-- Python 3.11 or later;
-- no runtime dependency outside the standard library;
-- `pytest` and `ruff` for development.
-
-```bash
-python -m pip install -e ".[dev]"
-pytest -q
-```
-
-Run the synthetic integration example:
-
-```bash
-python examples/run_precision_gate.py
-```
-
-The example uses synthetic data only and writes derived reports to `outputs/`.
-
-## Minimal use
-
-```python
-from precision_gate import PrecisionPipeline, write_report_bundle
-
-result = PrecisionPipeline().run(
-    execution_id="case-001",
-    tcria_bundle={
-        "accusation_set": [],
-        "non_accusation_set": [
-            {
-                "file_name": "case.md",
-                "sha256": "0" * 64,
-                "extraction_status": "ok",
-                "classification": "fact_supported",
-                "information_state": "fact_supported",
-                "evidence_refs": ["EVD-001"],
-                "summary": "Fact explicitly supported by the documented trail.",
-            }
-        ],
-    },
-    api_outputs=[
-        {
-            "output_id": "api-001",
-            "kind": "synthesis",
-            "content": "A model-generated reading that remains an inference.",
-            "support_refs": ["EVD-001"],
-            "requires_human_review": True,
-        }
-    ],
-)
-
-write_report_bundle(result, "outputs")
-```
-
-An API synthesis remains an inference unless it is explicitly classified as `fact_supported`, has explicit support references, and preserves a permitted custody state.
-
-## Quinta Ordem integration
-
-`build_execution_context_payload(...)` creates a detached dictionary compatible with the documented Quinta Ordem `ExecutionContext` fields:
-
-- `execution_id`;
-- `evidence`;
-- `artifacts`;
-- `gate_results`;
-- `logs`;
-- `decisions`;
-- `metadata`.
-
-`to_quinta_execution_context(...)` creates the concrete Quinta Ordem dataclass when the `quinta_ordem` package is available in the same Python environment.
-
-`adapt_gate_decision(...)` reads a serialized Quinta Ordem decision and preserves:
-
-- status;
-- confidence and verifier breakdown;
-- findings;
-- severity;
-- required action;
-- remaining uncertainties;
-- execution-context hash;
-- human-review requirements.
-
-## Markdown outputs
-
-`write_report_bundle(...)` writes eight derived `.md` views:
-
-```text
-precision_summary.md
-precision_custody.md
-precision_supported.md
-precision_pending.md
-precision_blocked.md
-precision_returned.md
-precision_inferred.md
-precision_human_review.md
-```
-
-Every output is marked as a derived analytical artifact. Reports do not modify, replace, or become part of the original evidence.
-
-## Metrics
-
-The initial metrics are deliberately transparent:
-
-- **custody integrity rate**: proportion of events with preserved, referenced, hashed, or manifested custody;
-- **operational precision**: safely grounded supported facts among fact-like candidates;
-- **release safety rate**: safe candidates among events marked released or promotable;
-- counts for pending, blocked, returned, inferred, and human-review-required states.
-
-These are engineering measurements. They are not guarantees of absolute, legal, scientific, or factual truth.
-
 ## Product boundaries
 
 TCRIA remains the original product.
 
-Fifth Order / Quinta Ordem Gate remains the deterministic gate product.
+Fifth-order / Quinta Ordem Gate remains the deterministic gate product.
 
-Precision Gate is the third product that composes both while preserving their boundaries.
+Precision Gate is the third product: the mobile custody, precision, alert, and reporting layer that composes both while preserving their boundaries.
 
 No TCRIA principle may be abandoned, weakened, replaced, or silently bypassed without explicit owner consent.
 
-## Chain-of-custody boundary
-
-This repository must not contain original real evidence, identifiable documents, unredacted private records, or confidential process material.
-
-Allowed repository material includes:
-
-- code and documentation;
-- synthetic fixtures;
-- anonymized examples;
-- hashes and manifests;
-- schemas;
-- derived reports;
-- validation summaries.
-
 ## Human decision
 
-Precision Gate informs, classifies, alerts, measures, and preserves custody.
+Precision Gate informs, classifies, alerts, and preserves custody.
 
-It does not replace human judgment, institutional authority, legal review, medical review, credit review, or any final decision affecting rights, health, liberty, finance, employment, or third parties.
+It does not replace human judgment, institutional authority, legal review, medical review, credit review, or any final decision affecting rights, health, liberty, finance, or third parties.
 
 ## Initial integration sources
 
 - TCRIA base: `batt1984rodrigo-del/tcria-09215b00`
 - Quinta Ordem base: `batt1984rodrigo-del/Fifth-order/tree/main/quinta-ordem-gate`
 
-## Validation status and next work
+## First implementation direction
 
-The local suite currently contains 20 passing tests covering the custody core, adapters, Quinta Ordem contract mapping, metrics, orchestration, and Markdown generation.
+The reference implementation now defines:
 
-The next validation phase should add:
+- immutable, versioned custody events;
+- an append-only SHA-256 receipt chain;
+- strict adapters for the official TCRIA audit bundle, external API output, and Quinta
+  Ordem contracts;
+- deterministic coherence alerts;
+- monotonic block, read-failure, and human-review requirements;
+- final-only JSON, Markdown, and manifest artifacts;
+- observed validation metrics for operational precision and release safety.
 
-1. retrospective real cases with lawful and controlled access;
-2. malformed, incomplete, contradictory, and adversarial inputs;
-3. mutation and property-based tests;
-4. direct integration runs against installed TCRIA and Quinta Ordem packages;
-5. performance, scale, privacy, and reproducibility measurements;
-6. independent human review and baseline comparison.
+## Architecture
 
-The product is now executable as an initial integration layer. It is not yet represented as fully validated for consequential production decisions.
+```mermaid
+flowchart LR
+    T[TCRIA official audit bundle] -->|reference + SHA-256| P[Precision custody trail]
+    A[External AI/API output] -->|provider-neutral envelope| P
+    P -->|ExecutionContext v1.0| Q[Quinta Ordem Gate]
+    Q -->|GateDecision v1.0| P
+    P --> C[Deterministic coherence assessment]
+    C --> H[Human review]
+    H --> R[Final derived report + manifest]
+```
+
+Precision Gate never reads a path from a TCRIA bundle to reopen original evidence. It
+does not invoke an AI provider. It does not copy TCRIA or Quinta Ordem decision logic.
+Each product remains independently governed.
+
+## Runtime modules
+
+| Module | Responsibility |
+|---|---|
+| `contracts.py` | Versioned states, source references, immutable events, promotion guards |
+| `ledger.py` | Canonical event serialization, SHA-256 receipts, chain verification |
+| `tcria_adapter.py` | Strict observation of a completed official TCRIA audit bundle |
+| `api_output_adapter.py` | Provider-neutral observation of external AI/API output |
+| `quinta_adapter.py` | Quinta `ExecutionContext` handoff and `GateDecision` ingestion |
+| `coherence.py` | Deterministic divergence, omission, promotion, and custody alerts |
+| `pipeline.py` | Explicit external handoff and human-review stages |
+| `reporting.py` | Final consolidated JSON/Markdown report and manifest |
+| `metrics.py` | Labeled-case operational validation metrics |
+
+## Release semantics
+
+`released` means that an output is eligible for delivery to the responsible human or
+institutional flow. It requires:
+
+1. an `APPROVED` Quinta Ordem result;
+2. completed human review with an accepted outcome;
+3. no unresolved block, read failure, review requirement, or coherence conflict;
+4. a valid append-only custody chain.
+
+It does not mean that Precision Gate decided a right, legal responsibility, medical
+question, credit outcome, liberty interest, or other material consequence.
+
+## External API boundary
+
+The first implementation deliberately keeps AI/API execution outside Precision Gate.
+The adapter accepts only a versioned envelope containing input references, provider/model
+metadata, prompt reference or hash, output reference/hash, output nature, and optional
+claim relations. It neither requests nor stores hidden chain-of-thought.
+
+## Validation
+
+```bash
+python -m pip install -e ".[dev]"
+pytest
+ruff check .
+```
+
+The default `0.95` validation target is measured over labeled cases with explicit
+numerators, denominators, and sample sizes. A metric with no eligible cases is
+`not_evaluated`, never an artificial 100%.
+
+See [`docs/PRODUCT_ARCHITECTURE.md`](docs/PRODUCT_ARCHITECTURE.md),
+[`docs/INTEGRATION_CONTRACTS.md`](docs/INTEGRATION_CONTRACTS.md), and
+[`docs/CHAIN_OF_CUSTODY.md`](docs/CHAIN_OF_CUSTODY.md) for the complete contract.

@@ -49,3 +49,29 @@ Precision Gate must preserve at least these TCRIA foundations:
 When a conflict appears between product implementation and TCRIA principles, the owner decides.
 
 Until the owner decides, the safest implementation is to preserve the TCRIA principle and mark the Precision Gate step as unresolved or blocked for design review.
+
+## Executable enforcement
+
+The reference implementation enforces this policy at four boundaries:
+
+1. `TCRIAAuditBundleAdapter` rejects inconsistent counts, partitions, hashes, extraction
+   states, accusation/gate coverage, and unknown mappings instead of repairing them.
+2. `CustodyTrail` rejects unsupported promotion, unsafe release, duplicate events, and
+   implicit removal of blocks, failed readings, or review requirements.
+3. `QuintaExecutionContextAdapter` preserves events as unpromoted decisions and signals
+   as open verification points; non-approved Quinta results retain human review.
+4. `FinalReportBuilder` refuses to report before finalization or from an invalid chain.
+
+Fields not explicitly interpreted remain bound to the immutable source bundle through
+its source reference and canonical payload hash. They are not silently converted into
+confidence or facts.
+
+## Contract drift
+
+Unsupported contract profiles, versions, or statuses fail closed. Updating an adapter
+requires:
+
+- a documented upstream field mapping;
+- synthetic regression fixtures;
+- confirmation that no original evidence or hidden model reasoning is introduced;
+- owner review when the new mapping would weaken a TCRIA invariant.
