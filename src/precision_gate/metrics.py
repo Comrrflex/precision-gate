@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
-from typing import Iterable
 
 from precision_gate.custody_state import CustodyState, InformationState, PrecisionEvent
-
 
 _SAFE_CUSTODY = {
     CustodyState.PRESERVED,

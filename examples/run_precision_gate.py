@@ -2,7 +2,6 @@ from pathlib import Path
 
 from precision_gate import PrecisionPipeline, write_report_bundle
 
-
 bundle = {
     "accusation_set": [],
     "non_accusation_set": [
