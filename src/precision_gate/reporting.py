@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from precision_gate.custody_state import CustodyState, InformationState, PrecisionEvent
+from precision_gate.custody_state import InformationState, PrecisionEvent
 from precision_gate.pipeline import PipelineResult
 
 
