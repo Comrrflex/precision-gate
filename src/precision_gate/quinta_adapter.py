@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from hashlib import sha256
 from typing import Any
 
@@ -31,6 +32,10 @@ from precision_gate.contracts import (
 
 class QuintaAdapterError(ContractError):
     """Raised when the Quinta Ordem handoff or decision violates version 1.0."""
+
+
+class QuintaIntegrationUnavailable(RuntimeError):
+    """Raised when the optional Quinta Ordem Python package is not installed."""
 
 
 _BREAKDOWN_FIELDS = (
@@ -403,3 +408,198 @@ def _unit_interval(value: Any, field_name: str) -> float:
     if not math.isfinite(normalized) or not 0.0 <= normalized <= 1.0:
         raise QuintaAdapterError(f"{field_name} must be between 0 and 1.")
     return normalized
+
+
+def build_execution_context_payload(
+    events: Sequence[PrecisionEvent],
+    *,
+    execution_id: str,
+    gate_results: list[dict[str, Any]] | None = None,
+    logs: list[dict[str, Any]] | None = None,
+    decisions: list[dict[str, Any]] | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a detached compatibility payload for Quinta ``ExecutionContext``."""
+
+    payload = QuintaExecutionContextAdapter().build_payload(
+        events,
+        execution_id=execution_id,
+        metadata=metadata,
+    )
+    payload["gate_results"] = [
+        *payload["gate_results"],
+        *deepcopy(gate_results or []),
+    ]
+    payload["logs"] = [*payload["logs"], *deepcopy(logs or [])]
+    payload["decisions"] = [*payload["decisions"], *deepcopy(decisions or [])]
+    payload.pop("quinta_ordem_adapter_version")
+    payload.pop("signals_for_verification")
+    payload["metadata"].setdefault("human_decision_required", True)
+    return payload
+
+
+def to_quinta_execution_context(payload: Mapping[str, Any]) -> Any:
+    try:
+        from quinta_ordem.models import ExecutionContext
+    except ImportError as exc:
+        raise QuintaIntegrationUnavailable(
+            "Install or expose the Quinta Ordem package before requesting a concrete "
+            "ExecutionContext instance."
+        ) from exc
+    required = ("execution_id", "evidence", "artifacts", "gate_results", "logs", "decisions")
+    missing = [key for key in required if key not in payload]
+    if missing:
+        raise QuintaAdapterError(
+            f"ExecutionContext payload is missing: {', '.join(missing)}."
+        )
+    return ExecutionContext(
+        execution_id=payload["execution_id"],
+        evidence=deepcopy(payload["evidence"]),
+        artifacts=deepcopy(payload["artifacts"]),
+        gate_results=deepcopy(payload["gate_results"]),
+        logs=deepcopy(payload["logs"]),
+        decisions=deepcopy(payload["decisions"]),
+        metadata=deepcopy(payload.get("metadata", {})),
+    )
+
+
+def adapt_gate_decision(payload: Mapping[str, Any]) -> tuple[PrecisionEvent, ...]:
+    """Adapt a lightweight GateDecision into non-releasing compatibility events."""
+
+    if not isinstance(payload, Mapping):
+        raise QuintaAdapterError("Gate decision must be a mapping.")
+    source = deepcopy(dict(payload))
+    execution_id = _compat_required_text(source, "execution_id")
+    status = _compat_required_text(source, "status").lower()
+    gate_status = _decision_status(status)
+    findings = source.get("findings", [])
+    if not isinstance(findings, list):
+        raise QuintaAdapterError("findings must be a list.")
+    human_review_required = bool(source.get("human_review_required", False))
+    if gate_status is not GateStatus.APPROVED:
+        human_review_required = True
+    context_sha256 = _compat_optional_text(source.get("execution_context_sha256"))
+    if context_sha256 is not None:
+        context_sha256 = validate_sha256(
+            context_sha256,
+            field_name="execution_context_sha256",
+        )
+    decision_state = {
+        GateStatus.APPROVED: InformationState.PENDING,
+        GateStatus.CONDITIONAL: InformationState.PENDING,
+        GateStatus.RETURNED: InformationState.RETURNED_FOR_CORRECTION,
+        GateStatus.BLOCKED: InformationState.BLOCKED,
+        GateStatus.NOT_EVALUATED: InformationState.HUMAN_REVIEW_REQUIRED,
+    }[gate_status]
+    events: list[PrecisionEvent] = [
+        PrecisionEvent(
+            event_id=f"quinta:{execution_id}:decision",
+            source_layer=SourceLayer.QUINTA_ORDEM,
+            information_id=execution_id,
+            information_state=decision_state,
+            custody_state=(
+                CustodyState.HASHED
+                if context_sha256 is not None
+                else CustodyState.REFERENCED
+            ),
+            summary=f"Quinta Ordem decision: {status}.",
+            support_refs=(execution_id,),
+            sha256=context_sha256,
+            requires_human_review=human_review_required,
+            promotable_as_fact=False,
+            details={
+                "confidence": source.get("confidence"),
+                "breakdown": deepcopy(source.get("breakdown", {})),
+                "remaining_uncertainties": deepcopy(
+                    source.get("remaining_uncertainties", [])
+                ),
+                "evaluated_verifiers": deepcopy(source.get("evaluated_verifiers", [])),
+                "compatibility_profile": True,
+            },
+            gate_status=gate_status,
+            human_review_state=(
+                HumanReviewState.REQUIRED
+                if human_review_required
+                else HumanReviewState.NOT_REQUIRED
+            ),
+        )
+    ]
+    for index, raw_finding in enumerate(findings):
+        if not isinstance(raw_finding, Mapping):
+            raise QuintaAdapterError(f"findings[{index}] must be a mapping.")
+        finding = deepcopy(dict(raw_finding))
+        point_id = _compat_required_text(finding, "point_id")
+        message = _compat_required_text(finding, "message")
+        severity = (_compat_optional_text(finding.get("severity")) or "warning").lower()
+        refs = _compat_finding_refs(finding.get("evidence_refs", []))
+        state = _compat_finding_state(finding, severity)
+        events.append(
+            PrecisionEvent(
+                event_id=f"quinta:{execution_id}:finding:{point_id}",
+                source_layer=SourceLayer.QUINTA_ORDEM,
+                information_id=point_id,
+                information_state=state,
+                custody_state=(
+                    CustodyState.REFERENCED if refs else CustodyState.UNKNOWN
+                ),
+                summary=message,
+                support_refs=refs,
+                requires_human_review=True,
+                promotable_as_fact=False,
+                details={
+                    "verifier": finding.get("verifier"),
+                    "code": finding.get("code"),
+                    "severity": severity,
+                    "return_to": finding.get("return_to"),
+                    "required_action": finding.get("required_action"),
+                    "details": deepcopy(finding.get("details", {})),
+                    "compatibility_profile": True,
+                },
+                gate_status=gate_status,
+                human_review_state=HumanReviewState.REQUIRED,
+            )
+        )
+    return tuple(events)
+
+
+def _compat_finding_state(
+    finding: Mapping[str, Any],
+    severity: str,
+) -> InformationState:
+    return_to = (_compat_optional_text(finding.get("return_to")) or "").lower()
+    if return_to in {"human_review", "human-review"}:
+        return InformationState.HUMAN_REVIEW_REQUIRED
+    if return_to:
+        return InformationState.RETURNED_FOR_CORRECTION
+    if severity in {"critical", "high"}:
+        return InformationState.BLOCKED
+    return InformationState.PENDING
+
+
+def _compat_finding_refs(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise QuintaAdapterError("finding evidence_refs must be a list.")
+    refs: list[str] = []
+    for index, item in enumerate(value):
+        if isinstance(item, str) and item.strip():
+            refs.append(item.strip())
+        elif isinstance(item, Mapping) and _compat_optional_text(item.get("artifact_id")):
+            refs.append(_compat_optional_text(item.get("artifact_id")) or "")
+        else:
+            raise QuintaAdapterError(
+                f"finding evidence_refs[{index}] must be a string or artifact mapping."
+            )
+    return tuple(refs)
+
+
+def _compat_required_text(payload: Mapping[str, Any], key: str) -> str:
+    value = _compat_optional_text(payload.get(key))
+    if value is None:
+        raise QuintaAdapterError(f"{key} is required.")
+    return value
+
+
+def _compat_optional_text(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None

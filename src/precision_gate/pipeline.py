@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any
 
 from precision_gate._validation import strict_snapshot
-from precision_gate.api_output_adapter import APIOutputAdapter
+from precision_gate.api_output_adapter import APIOutputAdapter, adapt_api_outputs
 from precision_gate.coherence import CoherenceAssessment, CoherenceEvaluator
 from precision_gate.contracts import (
     CustodyState,
@@ -19,8 +19,17 @@ from precision_gate.contracts import (
     utc_now,
 )
 from precision_gate.ledger import CustodyTrail
-from precision_gate.quinta_adapter import QuintaExecutionContextAdapter
-from precision_gate.tcria_adapter import TCRIAAdaptation, TCRIAAuditBundleAdapter
+from precision_gate.metrics import PrecisionMetrics, calculate_metrics
+from precision_gate.quinta_adapter import (
+    QuintaExecutionContextAdapter,
+    adapt_gate_decision,
+    build_execution_context_payload,
+)
+from precision_gate.tcria_adapter import (
+    TCRIAAdaptation,
+    TCRIAAuditBundleAdapter,
+    adapt_tcria_bundle,
+)
 
 
 class PipelineError(RuntimeError):
@@ -382,3 +391,67 @@ def _string_sequence(values: Sequence[str], field_name: str) -> tuple[str, ...]:
     if len(set(normalized)) != len(normalized):
         raise PipelineError(f"{field_name} must not contain duplicates.")
     return tuple(normalized)
+
+
+@dataclass(frozen=True)
+class PipelineResult:
+    """Compatibility result for classification-only orchestration."""
+
+    execution_id: str
+    events: tuple[PrecisionEvent, ...]
+    execution_context: dict[str, Any]
+    metrics: PrecisionMetrics
+    alerts: tuple[str, ...]
+
+
+class PrecisionPipeline:
+    """Compatibility pipeline that never performs release or finalization."""
+
+    def run(
+        self,
+        *,
+        execution_id: str,
+        tcria_bundle: Mapping[str, Any],
+        api_outputs: Sequence[Mapping[str, Any]] = (),
+        quinta_decision: Mapping[str, Any] | None = None,
+    ) -> PipelineResult:
+        tcria_events = adapt_tcria_bundle(tcria_bundle)
+        api_events = adapt_api_outputs(api_outputs)
+        pre_gate_events = (*tcria_events, *api_events)
+        execution_context = build_execution_context_payload(
+            pre_gate_events,
+            execution_id=execution_id,
+            metadata={"source": "precision_gate_compatibility_pipeline"},
+        )
+        quinta_events = adapt_gate_decision(quinta_decision) if quinta_decision else ()
+        events = (*pre_gate_events, *quinta_events)
+        for event in events:
+            event.assert_safe_promotion()
+        return PipelineResult(
+            execution_id=execution_id,
+            events=events,
+            execution_context=execution_context,
+            metrics=calculate_metrics(events),
+            alerts=_compat_alerts(events),
+        )
+
+
+def _compat_alerts(events: tuple[PrecisionEvent, ...]) -> tuple[str, ...]:
+    alerts: list[str] = []
+    for event in events:
+        if event.custody_state in {CustodyState.BROKEN, CustodyState.UNKNOWN}:
+            alerts.append(
+                f"{event.event_id}: custody is {event.custody_state.value}; "
+                "review the trail."
+            )
+        if event.requires_human_review:
+            alerts.append(f"{event.event_id}: human review is required.")
+        if event.information_state in {
+            InformationState.BLOCKED,
+            InformationState.RETURNED_FOR_CORRECTION,
+        }:
+            alerts.append(
+                f"{event.event_id}: state is {event.information_state.value}; "
+                "do not release silently."
+            )
+    return tuple(dict.fromkeys(alerts))

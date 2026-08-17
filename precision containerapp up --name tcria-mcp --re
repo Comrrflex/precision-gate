@@ -1,0 +1,2 @@
+az containerapp up --name tcria-mcp --resource-group <rg> \
+  --source . --dockerfile Dockerfile.mcp --ingress external --target-port 8000

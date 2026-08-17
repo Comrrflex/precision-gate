@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from hashlib import sha256
 from typing import Any
 
@@ -199,3 +200,157 @@ def _claim_relations(payload: Mapping[str, Any]) -> tuple[dict[str, str], ...]:
                 ) from exc
         relations.append(normalized)
     return tuple(relations)
+
+
+def adapt_api_output(payload: Mapping[str, Any]) -> PrecisionEvent:
+    """Compatibility adapter for a simple external API result.
+
+    The versioned ``APIOutputAdapter`` remains the authoritative custody boundary.
+    This helper preserves the base branch's lightweight API for non-release workflows.
+    """
+
+    if not isinstance(payload, Mapping):
+        raise APIOutputAdapterError("API output must be a mapping.")
+    source = deepcopy(dict(payload))
+    output_id = _compat_identifier(source)
+    summary = _compat_summary(source)
+    state = _compat_state(source)
+    support_refs = _compat_string_tuple(
+        source.get("support_refs", source.get("evidence_refs", [])),
+        "support_refs",
+    )
+    digest = _compat_optional_text(source.get("sha256"))
+    requested_promotion = bool(source.get("promotable_as_fact", False))
+    if requested_promotion and state is not InformationState.FACT_SUPPORTED:
+        raise APIOutputAdapterError(
+            "API output may be promotable only when information_state is fact_supported."
+        )
+    custody = _compat_custody(source, digest=digest, support_refs=support_refs)
+    event = PrecisionEvent(
+        event_id=f"api:{output_id}",
+        source_layer=SourceLayer.API,
+        information_id=output_id,
+        information_state=state,
+        custody_state=custody,
+        summary=summary,
+        support_refs=support_refs,
+        sha256=digest,
+        requires_human_review=bool(source.get("requires_human_review", False)),
+        promotable_as_fact=requested_promotion,
+        details={
+            "model": source.get("model"),
+            "metadata": deepcopy(source.get("metadata", {})),
+            "compatibility_profile": True,
+        },
+    )
+    try:
+        event.assert_safe_promotion()
+    except ValueError as exc:
+        raise APIOutputAdapterError(str(exc)) from exc
+    return event
+
+
+def adapt_api_outputs(
+    payloads: Sequence[Mapping[str, Any]],
+) -> tuple[PrecisionEvent, ...]:
+    if isinstance(payloads, (str, bytes)) or not isinstance(payloads, Sequence):
+        raise APIOutputAdapterError("API outputs must be a sequence of mappings.")
+    return tuple(adapt_api_output(payload) for payload in payloads)
+
+
+def _compat_identifier(payload: Mapping[str, Any]) -> str:
+    for key in ("output_id", "id", "information_id"):
+        value = _compat_optional_text(payload.get(key))
+        if value:
+            return value
+    raise APIOutputAdapterError("API output requires output_id, id, or information_id.")
+
+
+def _compat_summary(payload: Mapping[str, Any]) -> str:
+    for key in ("summary", "content", "text", "message"):
+        value = _compat_optional_text(payload.get(key))
+        if value:
+            return value
+    raise APIOutputAdapterError("API output requires summary, content, text, or message.")
+
+
+def _compat_state(payload: Mapping[str, Any]) -> InformationState:
+    declared = _compat_optional_text(payload.get("information_state"))
+    if declared:
+        try:
+            state = InformationState(declared.lower())
+        except ValueError as exc:
+            raise APIOutputAdapterError(
+                f"Unknown information_state: {declared!r}."
+            ) from exc
+        if state not in {
+            InformationState.API_OPINION,
+            InformationState.API_INFERENCE,
+            InformationState.FACT_SUPPORTED,
+            InformationState.NULL_RESULT,
+            InformationState.PENDING,
+            InformationState.HUMAN_REVIEW_REQUIRED,
+        }:
+            raise APIOutputAdapterError(
+                f"State {state.value!r} is not valid for an API output."
+            )
+        return state
+    kind = (_compat_optional_text(payload.get("kind")) or "inference").lower()
+    mapping = {
+        "opinion": InformationState.API_OPINION,
+        "null": InformationState.NULL_RESULT,
+        "no_conclusion": InformationState.NULL_RESULT,
+        "pending": InformationState.PENDING,
+        "review": InformationState.PENDING,
+        "inference": InformationState.API_INFERENCE,
+        "prediction": InformationState.API_INFERENCE,
+        "synthesis": InformationState.API_INFERENCE,
+        "final_text": InformationState.API_INFERENCE,
+    }
+    try:
+        return mapping[kind]
+    except KeyError as exc:
+        raise APIOutputAdapterError(f"Unknown API output kind: {kind!r}.") from exc
+
+
+def _compat_string_tuple(value: Any, field_name: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise APIOutputAdapterError(f"{field_name} must be a list or tuple of strings.")
+    result: list[str] = []
+    for index, item in enumerate(value):
+        text = _compat_optional_text(item)
+        if text is None:
+            raise APIOutputAdapterError(
+                f"{field_name}[{index}] must be a non-empty string."
+            )
+        result.append(text)
+    return tuple(result)
+
+
+def _compat_custody(
+    payload: Mapping[str, Any],
+    *,
+    digest: str | None,
+    support_refs: tuple[str, ...],
+) -> CustodyState:
+    declared = _compat_optional_text(payload.get("custody_state"))
+    if declared:
+        try:
+            return CustodyState(declared.lower())
+        except ValueError as exc:
+            raise APIOutputAdapterError(
+                f"Unknown custody_state: {declared!r}."
+            ) from exc
+    if digest:
+        return CustodyState.HASHED
+    if support_refs:
+        return CustodyState.REFERENCED
+    return CustodyState.UNKNOWN
+
+
+def _compat_optional_text(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None

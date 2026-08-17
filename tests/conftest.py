@@ -6,7 +6,6 @@ from typing import Any
 
 import pytest
 
-
 GATE_NAMES = (
     "prescriptiveGate",
     "complianceGate",
