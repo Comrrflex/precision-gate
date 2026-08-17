@@ -47,6 +47,7 @@ class HumanReviewOutcome(str, Enum):
 class PipelineFinalization:
     trace_id: str
     released: bool
+    source_facts_gate_approved: bool
     gate_status: GateStatus
     human_outcome: HumanReviewOutcome
     final_chain_sha256: str
@@ -79,6 +80,7 @@ class PrecisionGatePipeline:
         self.coherence_evaluator = coherence_evaluator or CoherenceEvaluator()
         self.stage = PipelineStage.CREATED
         self._quinta_payload: dict[str, Any] | None = None
+        self._quinta_context_sha256: str | None = None
         self._quinta_decision_event: PrecisionEvent | None = None
         self._human_events: list[PrecisionEvent] = []
         self._human_outcome: HumanReviewOutcome | None = None
@@ -87,6 +89,10 @@ class PrecisionGatePipeline:
     @property
     def finalization(self) -> PipelineFinalization | None:
         return self._finalization
+
+    @property
+    def quinta_context_sha256(self) -> str | None:
+        return self._quinta_context_sha256
 
     def ingest_tcria(
         self,
@@ -145,6 +151,25 @@ class PrecisionGatePipeline:
                 + ", ".join(unknown_refs)
                 + "."
             )
+        known_information_ids = {
+            existing.information_id for existing in self.trail.events
+        }
+        relation_targets = {
+            relation["information_id"]
+            for relation in event.details.get("claim_relations", ())
+            if isinstance(relation, Mapping)
+            and isinstance(relation.get("information_id"), str)
+        }
+        unknown_relation_targets = sorted(
+            relation_targets - known_information_ids
+        )
+        if unknown_relation_targets:
+            raise PipelineError(
+                "API claim_relations reference information not present in the "
+                "observed trail: "
+                + ", ".join(unknown_relation_targets)
+                + "."
+            )
         appended = self.trail.append(event).event
         self.stage = PipelineStage.API_OBSERVED
         return appended
@@ -159,6 +184,9 @@ class PrecisionGatePipeline:
             self.trail.events,
             execution_id=self.trace_id,
             metadata=metadata,
+        )
+        self._quinta_context_sha256 = self.quinta_adapter.expected_context_sha256(
+            self._quinta_payload
         )
         self.stage = PipelineStage.QUINTA_CONTEXT_READY
         return strict_snapshot(self._quinta_payload, name="Quinta payload")
@@ -177,6 +205,15 @@ class PrecisionGatePipeline:
             observed_at=observed_at or self.clock(),
             source_ref=source_ref,
         )
+        returned_context_sha256 = event.details.get("execution_context_sha256")
+        if (
+            self._quinta_context_sha256 is None
+            or returned_context_sha256 != self._quinta_context_sha256
+        ):
+            raise PipelineError(
+                "GateDecision execution_context_sha256 does not match the handed-off "
+                "ExecutionContext."
+            )
         self._quinta_decision_event = self.trail.append(event).event
         self.stage = PipelineStage.QUINTA_DECIDED
         return self._quinta_decision_event
@@ -206,10 +243,12 @@ class PrecisionGatePipeline:
 
         normalized_resolves = _string_sequence(resolves, "resolves")
         normalized_support_refs = _string_sequence(support_refs, "support_refs")
-        failed_resolutions = set(normalized_resolves).intersection(self.trail.active_read_failures)
-        if failed_resolutions and not normalized_support_refs:
+        active_resolutions = set(normalized_resolves).intersection(
+            self.trail.active_condition_ids
+        )
+        if active_resolutions and not normalized_support_refs:
             raise PipelineError(
-                "Resolving an extraction failure requires explicit human support references."
+                "Resolving an active condition requires explicit human support references."
             )
 
         state = {
@@ -262,8 +301,18 @@ class PrecisionGatePipeline:
 
         gate_status = self._quinta_decision_event.gate_status
         assessment = self.assess()
+        source_facts_gate_approved = all(
+            event.gate_status is GateStatus.APPROVED
+            for event in self.trail.events
+            if event.source_layer is SourceLayer.TCRIA
+            and event.information_state is InformationState.FACT_SUPPORTED
+            and "source_partition" in event.details
+        )
+        chain_valid = self.trail.verify().valid
         released = (
             gate_status is GateStatus.APPROVED
+            and source_facts_gate_approved
+            and chain_valid
             and self._human_outcome is HumanReviewOutcome.ACCEPTED
             and not self.trail.active_blocks
             and not self.trail.active_reviews
@@ -306,6 +355,7 @@ class PrecisionGatePipeline:
         self._finalization = PipelineFinalization(
             trace_id=self.trace_id,
             released=released,
+            source_facts_gate_approved=source_facts_gate_approved,
             gate_status=gate_status,
             human_outcome=self._human_outcome,
             final_chain_sha256=self.trail.final_chain_sha256,

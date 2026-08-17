@@ -7,6 +7,7 @@ import pytest
 
 from precision_gate import (
     CustodyState,
+    GateStatus,
     HumanReviewState,
     InformationState,
     PrecisionEvent,
@@ -106,6 +107,7 @@ def test_block_remains_active_until_explicit_resolution() -> None:
             information_state=InformationState.ORIGINAL_PRESERVED,
             custody_state=CustodyState.REFERENCED,
             summary="Human resolved the synthetic block.",
+            support_refs=("REPLACEMENT-SUPPORT-1",),
             resolves=("block-1",),
             human_review_state=HumanReviewState.COMPLETED,
         )
@@ -162,3 +164,20 @@ def test_read_failure_resolution_requires_replacement_support() -> None:
     )
 
     assert trail.active_read_failures == ()
+
+
+def test_release_requires_prior_gate_and_human_review_events() -> None:
+    trail = CustodyTrail("trace-1")
+    release = PrecisionEvent(
+        event_id="release-1",
+        source_layer=SourceLayer.PRECISION_GATE,
+        information_id="release-1",
+        information_state=InformationState.RELEASED,
+        custody_state=CustodyState.REFERENCED,
+        summary="Attempted release without prior authority.",
+        gate_status=GateStatus.APPROVED,
+        human_review_state=HumanReviewState.COMPLETED,
+    )
+
+    with pytest.raises(ValueError, match="prior approved gate"):
+        trail.append(release)

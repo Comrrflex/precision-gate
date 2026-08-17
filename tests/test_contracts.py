@@ -76,3 +76,31 @@ def test_owner_decision_event_is_a_visible_design_block() -> None:
     assert event.requires_human_review is True
     assert event.details["owner_decision_required"] is True
     assert event.details["design_blocked"] is True
+
+
+def test_event_may_resolve_only_one_condition() -> None:
+    with pytest.raises(ContractError, match="at most one"):
+        PrecisionEvent(
+            event_id="evt-bulk-resolution",
+            source_layer="human_review",
+            information_id="review-1",
+            information_state=InformationState.ORIGINAL_PRESERVED,
+            custody_state=CustodyState.REFERENCED,
+            summary="Invalid bulk resolution.",
+            support_refs=("REVIEW-BASIS-1",),
+            resolves=("condition-1", "condition-2"),
+        )
+
+
+def test_human_review_flags_must_be_consistent() -> None:
+    with pytest.raises(ContractError, match="completed"):
+        PrecisionEvent(
+            event_id="evt-review-conflict",
+            source_layer="human_review",
+            information_id="review-1",
+            information_state=InformationState.PENDING,
+            custody_state=CustodyState.REFERENCED,
+            summary="Conflicting review state.",
+            requires_human_review=True,
+            human_review_state="completed",
+        )

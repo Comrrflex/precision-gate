@@ -7,6 +7,7 @@ from typing import Any
 
 from precision_gate.contracts import (
     ContractError,
+    GateStatus,
     HumanReviewState,
     InformationState,
     PrecisionEvent,
@@ -167,9 +168,32 @@ class CustodyTrail:
             failed_dependencies=related_failures,
         )
         if normalized.information_state is InformationState.RELEASED:
+            approved_gate_refs = tuple(
+                prior.event.event_id
+                for prior in self._receipts
+                if prior.event.source_layer is SourceLayer.QUINTA_ORDEM
+                and prior.event.gate_status is GateStatus.APPROVED
+            )
+            completed_human_review_refs = tuple(
+                prior.event.event_id
+                for prior in self._receipts
+                if prior.event.source_layer is SourceLayer.HUMAN_REVIEW
+                and prior.event.human_review_state is HumanReviewState.COMPLETED
+            )
+            nonapproved_source_fact_refs = tuple(
+                prior.event.event_id
+                for prior in self._receipts
+                if prior.event.source_layer is SourceLayer.TCRIA
+                and prior.event.information_state is InformationState.FACT_SUPPORTED
+                and "source_partition" in prior.event.details
+                and prior.event.gate_status is not GateStatus.APPROVED
+            )
             normalized.assert_safe_release(
                 active_blocks=self._active_blocks,
                 active_reviews=self._active_reviews,
+                approved_gate_refs=approved_gate_refs,
+                completed_human_review_refs=completed_human_review_refs,
+                nonapproved_source_fact_refs=nonapproved_source_fact_refs,
             )
 
         previous_receipt = self.final_chain_sha256
@@ -338,10 +362,8 @@ class CustodyTrail:
         for condition_id in event.resolves:
             if condition_id not in active:
                 raise LedgerError(f"Resolution references inactive condition: {condition_id}.")
-            if condition_id in self._active_read_failures and not event.support_refs:
-                raise LedgerError(
-                    "Resolving an unreadable or failed extraction requires explicit support_refs."
-                )
+            if not event.support_refs:
+                raise LedgerError("Resolving an active condition requires explicit support_refs.")
 
     def _apply_condition_changes(self, event: PrecisionEvent) -> None:
         for condition_id in event.resolves:

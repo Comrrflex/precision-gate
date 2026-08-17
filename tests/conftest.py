@@ -87,6 +87,7 @@ def make_quinta_decision() -> Callable[..., dict[str, Any]]:
         status: str = "approved",
         human_review_required: bool | None = None,
         confidence: float = 1.0,
+        context_sha256: str | None = None,
     ) -> dict[str, Any]:
         if human_review_required is None:
             human_review_required = status != "approved"
@@ -114,7 +115,9 @@ def make_quinta_decision() -> Callable[..., dict[str, Any]]:
                 "logical_consistency",
                 "resolution",
             ],
-            "execution_context_sha256": sha256(b"synthetic context").hexdigest(),
+            "execution_context_sha256": (
+                context_sha256 or sha256(b"synthetic context").hexdigest()
+            ),
         }
 
     return factory

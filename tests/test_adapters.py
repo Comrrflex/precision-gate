@@ -118,6 +118,16 @@ def test_tcria_adapter_preserves_extraction_failure_states(
     assert record_event.requires_human_review is True
 
 
+def test_tcria_adapter_rejects_conflicting_duplicate_extraction_status(
+    make_tcria_bundle,
+) -> None:
+    bundle = make_tcria_bundle(extraction_status="ok")
+    bundle["non_accusation_set"][0]["document"]["extraction_status"] = "ocr_failed"
+
+    with pytest.raises(TCRIAAdapterError, match="conflicting extraction_status"):
+        _adapt_tcria(bundle)
+
+
 def test_unknown_tcria_gate_status_fails_closed_but_preserves_source(
     make_tcria_bundle,
 ) -> None:
@@ -135,6 +145,41 @@ def test_unknown_tcria_gate_status_fails_closed_but_preserves_source(
     assert event.gate_status is GateStatus.BLOCKED
     assert event.details["source_status"] == "FUTURE_STATUS"
     assert event.details["unknown_source_status"] is True
+
+
+def test_blocked_source_gate_makes_supported_record_non_promotable(
+    make_tcria_bundle,
+) -> None:
+    bundle = make_tcria_bundle(
+        gate_statuses={
+            "prescriptiveGate": "BLOCKED",
+            "complianceGate": "PASS",
+            "traceabilityCheck": "PASS",
+            "maturityGate": "PASS",
+            "ledgerRuntimeCheck": "PASS",
+        }
+    )
+
+    adaptation = _adapt_tcria(bundle)
+    record = next(event for event in adaptation.events if event.event_id.endswith(":record"))
+
+    assert record.information_state is InformationState.FACT_SUPPORTED
+    assert record.gate_status is GateStatus.BLOCKED
+    assert record.promotable_as_fact is False
+    assert record.requires_human_review is True
+
+
+def test_blocked_overall_outcome_tightens_passed_source_gates(
+    make_tcria_bundle,
+) -> None:
+    bundle = make_tcria_bundle()
+    bundle["non_accusation_set"][0]["overall_outcome"] = "BLOCKED (syntheticOutcome)"
+
+    adaptation = _adapt_tcria(bundle)
+    record = next(event for event in adaptation.events if event.event_id.endswith(":record"))
+
+    assert record.gate_status is GateStatus.BLOCKED
+    assert record.promotable_as_fact is False
 
 
 def test_tcria_adapter_marks_unexplained_omission_for_review(
@@ -233,6 +278,29 @@ def test_quinta_handoff_rejects_conflicting_evidence_hashes() -> None:
 
     with pytest.raises(QuintaAdapterError, match="conflicting"):
         QuintaExecutionContextAdapter().build_payload(events, execution_id="trace-1")
+
+
+def test_quinta_handoff_does_not_infer_original_state_and_digest_is_stable() -> None:
+    event = PrecisionEvent(
+        event_id="evt-1",
+        source_layer="tcria",
+        information_id="info-1",
+        information_state=InformationState.FACT_SUPPORTED,
+        custody_state=CustodyState.HASHED,
+        summary="Synthetic supported event.",
+        support_refs=("DOC-1",),
+        sha256=sha256(b"document").hexdigest(),
+        trace_id="trace-1",
+    )
+    adapter = QuintaExecutionContextAdapter()
+    payload = adapter.build_payload([event], execution_id="trace-1")
+
+    first = adapter.expected_context_sha256(payload)
+    second = adapter.expected_context_sha256(payload)
+
+    assert "modified_original" not in payload["evidence"][0]
+    assert first == second
+    assert len(first) == 64
 
 
 def test_quinta_decision_maps_status_and_enforces_review_consistency(

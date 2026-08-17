@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping, Sequence
 from hashlib import sha256
@@ -86,7 +87,6 @@ class QuintaExecutionContextAdapter:
                 evidence_item = {
                     "artifact_id": evidence_id,
                     "sha256": event.sha256,
-                    "modified_original": False,
                     "source": (
                         event.source_reference.source_ref
                         if event.source_reference is not None
@@ -94,6 +94,13 @@ class QuintaExecutionContextAdapter:
                     ),
                     "custody_state": event.custody_state.value,
                 }
+                modified_original = event.details.get("modified_original")
+                if modified_original is not None:
+                    if not isinstance(modified_original, bool):
+                        raise QuintaAdapterError(
+                            f"Event {event.event_id!r} modified_original must be boolean."
+                        )
+                    evidence_item["modified_original"] = modified_original
                 existing = evidence_by_id.get(evidence_id)
                 if existing is not None and existing["sha256"] != event.sha256:
                     raise QuintaAdapterError(
@@ -189,6 +196,81 @@ class QuintaExecutionContextAdapter:
             "metadata": base_metadata,
         }
         return strict_snapshot(payload, name="Quinta ExecutionContext payload")
+
+    def expected_context_sha256(self, payload: Mapping[str, Any]) -> str:
+        """Hash the exact ExecutionContext produced by the published Quinta adapter."""
+
+        snapshot = strict_snapshot(payload, name="Quinta adapter payload")
+        version = require_text(snapshot, "quinta_ordem_adapter_version")
+        if version != QUINTA_EXECUTION_CONTEXT_VERSION:
+            raise QuintaAdapterError(
+                f"Unsupported Quinta adapter version: {version!r}."
+            )
+        execution_id = require_text(snapshot, "execution_id")
+        evidence = require_mapping_list(snapshot, "evidence")
+        artifacts = require_mapping_list(snapshot, "artifacts")
+        gate_results = require_mapping_list(snapshot, "gate_results")
+        logs = require_mapping_list(snapshot, "logs")
+        decisions = require_mapping_list(snapshot, "decisions")
+        signals = require_mapping_list(snapshot, "signals_for_verification")
+        metadata = require_mapping(snapshot, "metadata")
+        open_points = metadata.get("open_points")
+        if not isinstance(open_points, list):
+            raise QuintaAdapterError("metadata.open_points must be a list.")
+        context_open_points = list(open_points)
+
+        for index, result in enumerate(gate_results):
+            status = result.get("status")
+            if not isinstance(status, str) or not status.strip():
+                raise QuintaAdapterError(
+                    f"gate_results[{index}].status must be non-empty text."
+                )
+            result["status"] = status.strip().lower()
+
+        for index, signal in enumerate(signals):
+            signal_id = signal.get("signal_id")
+            if not isinstance(signal_id, str) or not signal_id.strip():
+                raise QuintaAdapterError(
+                    f"signals_for_verification[{index}].signal_id is required."
+                )
+            decision = {
+                "decision_id": signal_id,
+                "classification": "signal",
+                "promoted": False,
+            }
+            for key in ("support_level", "evidence_refs", "message", "details"):
+                if key in signal:
+                    decision[key] = signal[key]
+            decisions.append(decision)
+            context_open_points.append(
+                {
+                    "id": signal_id,
+                    "status": "open",
+                    "return_to": "human_review",
+                    "evidence_refs": signal.get("evidence_refs", []),
+                }
+            )
+        metadata["open_points"] = context_open_points
+        context = {
+            "execution_id": execution_id,
+            "evidence": evidence,
+            "artifacts": artifacts,
+            "gate_results": gate_results,
+            "logs": logs,
+            "decisions": decisions,
+            "metadata": metadata,
+        }
+        encoded = (
+            json.dumps(
+                context,
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+        return sha256(encoded).hexdigest()
 
     def adapt_decision(
         self,

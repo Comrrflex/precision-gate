@@ -146,6 +146,20 @@ class CoherenceEvaluator:
                         information_ids=(event.information_id,),
                         requires_human_review=True,
                     )
+                if event.gate_status not in {None, GateStatus.APPROVED}:
+                    gate_event_ids = _detail_string_tuple(
+                        event.details,
+                        "record_gate_event_ids",
+                    )
+                    add_alert(
+                        "FACT_NOT_APPROVED_BY_SOURCE_GATE",
+                        AlertSeverity.CRITICAL,
+                        "A fact_supported record was not approved by its source gates.",
+                        event_ids=(event.event_id, *gate_event_ids),
+                        information_ids=(event.information_id,),
+                        requires_human_review=True,
+                        details={"gate_status": event.gate_status.value},
+                    )
                 if related_failures:
                     add_alert(
                         "FAILED_READING_USED_AS_FACT",
@@ -189,6 +203,14 @@ class CoherenceEvaluator:
 
             if event.source_layer is SourceLayer.QUINTA_ORDEM and event.gate_status is not None:
                 latest_quinta_status = event.gate_status
+                if event.gate_status is GateStatus.APPROVED and active_blocks:
+                    add_alert(
+                        "QUINTA_APPROVED_WITH_ACTIVE_BLOCK",
+                        AlertSeverity.CRITICAL,
+                        "Quinta Ordem approved a context that still carried an active block.",
+                        event_ids=(event.event_id, *active_blocks),
+                        requires_human_review=True,
+                    )
 
             if event.information_state is InformationState.BLOCKED:
                 active_blocks[event.event_id] = event.information_id
@@ -388,6 +410,13 @@ def _detail_string_set(details: Mapping[str, Any], key: str) -> set[str]:
     return {item for item in value if isinstance(item, str) and item}
 
 
+def _detail_string_tuple(details: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = details.get(key, ())
+    if not isinstance(value, tuple):
+        return ()
+    return tuple(item for item in value if isinstance(item, str) and item)
+
+
 def _conditions_for_information(
     conditions: Mapping[str, str],
     information_ids: set[str],
@@ -418,6 +447,8 @@ def _best_supported(
 
 def _support_score(event: PrecisionEvent) -> int:
     if event.information_state is InformationState.FACT_SUPPORTED:
+        if event.gate_status not in {None, GateStatus.APPROVED}:
+            return 0
         if event.support_refs and has_traceable_custody(event.custody_state):
             return 4 if event.gate_status is GateStatus.APPROVED else 3
         return 0

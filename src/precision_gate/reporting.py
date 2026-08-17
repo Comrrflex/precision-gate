@@ -273,6 +273,10 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
         f"- **Trace:** `{report['trace_id']}`",
         f"- **Generated:** `{report['generated_at']}`",
         f"- **Released to human/institutional flow:** `{outcome['released']}`",
+        (
+            "- **All released facts approved by their source gates:** "
+            f"`{outcome['source_facts_gate_approved']}`"
+        ),
         f"- **Quinta Ordem status:** `{outcome['gate_status']}`",
         f"- **Human outcome:** `{outcome['human_outcome']}`",
         "",

@@ -244,10 +244,27 @@ class PrecisionEvent:
         object.__setattr__(self, "support_refs", _string_tuple(self.support_refs, "support_refs"))
         object.__setattr__(self, "caused_by", _string_tuple(self.caused_by, "caused_by"))
         object.__setattr__(self, "resolves", _string_tuple(self.resolves, "resolves"))
+        if len(self.resolves) > 1:
+            raise ContractError("An event may resolve at most one condition.")
         object.__setattr__(self, "details", _freeze_mapping(self.details, "details"))
 
         if self.requires_human_review and self.human_review_state is HumanReviewState.NOT_REQUIRED:
             object.__setattr__(self, "human_review_state", HumanReviewState.REQUIRED)
+        if (
+            self.requires_human_review
+            and self.human_review_state is HumanReviewState.COMPLETED
+        ):
+            raise ContractError(
+                "An event cannot require human review and mark it completed."
+            )
+        if (
+            not self.requires_human_review
+            and self.human_review_state
+            in {HumanReviewState.REQUIRED, HumanReviewState.PENDING}
+        ):
+            raise ContractError(
+                "Human review state requires requires_human_review=True."
+            )
 
     def assert_safe_promotion(
         self,
@@ -294,6 +311,9 @@ class PrecisionEvent:
         *,
         active_blocks: Iterable[str] = (),
         active_reviews: Iterable[str] = (),
+        approved_gate_refs: Iterable[str] = (),
+        completed_human_review_refs: Iterable[str] = (),
+        nonapproved_source_fact_refs: Iterable[str] = (),
     ) -> None:
         if self.information_state is not InformationState.RELEASED:
             raise PromotionError("Release guard requires a released event.")
@@ -306,6 +326,18 @@ class PrecisionEvent:
         if reviews:
             raise PromotionError(
                 "Released output has unresolved human review requirements: " + ", ".join(reviews)
+            )
+        gate_refs = tuple(approved_gate_refs)
+        if not gate_refs:
+            raise PromotionError("Released output requires a prior approved gate event.")
+        human_refs = tuple(completed_human_review_refs)
+        if not human_refs:
+            raise PromotionError("Released output requires a completed human review event.")
+        source_fact_refs = tuple(nonapproved_source_fact_refs)
+        if source_fact_refs:
+            raise PromotionError(
+                "Released output contains facts not approved by their source gates: "
+                + ", ".join(source_fact_refs)
             )
 
     def to_dict(self) -> dict[str, Any]:

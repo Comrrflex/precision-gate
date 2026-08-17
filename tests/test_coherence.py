@@ -4,6 +4,7 @@ from hashlib import sha256
 
 from precision_gate import (
     CustodyState,
+    GateStatus,
     InformationState,
     PrecisionEvent,
     SourceLayer,
@@ -72,6 +73,33 @@ def test_api_unseen_claim_against_tcria_trail_emits_alert() -> None:
 
     assert any(
         alert.code == "OBSERVED_ITEM_DESCRIBED_AS_UNSEEN"
+        for alert in assessment.alerts
+    )
+
+
+def test_supported_fact_blocked_by_source_gate_is_not_a_supported_reading() -> None:
+    event = PrecisionEvent(
+        event_id="blocked-fact",
+        source_layer=SourceLayer.TCRIA,
+        information_id="fact-1",
+        information_state=InformationState.FACT_SUPPORTED,
+        custody_state=CustodyState.HASHED,
+        summary="Synthetic fact blocked by its source gate.",
+        support_refs=("DOC-1",),
+        sha256=sha256(b"blocked-fact").hexdigest(),
+        requires_human_review=True,
+        details={
+            "source_partition": "non_accusation_set",
+            "record_gate_event_ids": ("source-gate-block",),
+        },
+        gate_status=GateStatus.BLOCKED,
+    )
+
+    assessment = CoherenceEvaluator().evaluate([event])
+
+    assert assessment.support_tier is SupportTier.UNSUPPORTED
+    assert any(
+        alert.code == "FACT_NOT_APPROVED_BY_SOURCE_GATE"
         for alert in assessment.alerts
     )
 
