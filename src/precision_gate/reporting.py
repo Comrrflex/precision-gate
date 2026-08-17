@@ -4,7 +4,7 @@ import json
 import os
 import re
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -19,7 +19,22 @@ from precision_gate.contracts import (
     utc_now,
 )
 from precision_gate.metrics import ValidationSummary
-from precision_gate.pipeline import PipelineStage, PrecisionGatePipeline
+from precision_gate.pipeline import (
+    PipelineResult,
+    PipelineStage,
+    PrecisionGatePipeline,
+)
+
+REPORT_FILENAMES = (
+    "precision_summary.md",
+    "precision_custody.md",
+    "precision_supported.md",
+    "precision_pending.md",
+    "precision_blocked.md",
+    "precision_returned.md",
+    "precision_inferred.md",
+    "precision_human_review.md",
+)
 
 
 class ReportingError(RuntimeError):
@@ -167,11 +182,13 @@ class FinalReportBuilder:
 
 
 def write_report_bundle(
-    bundle: ReportBundle,
+    bundle: ReportBundle | PipelineResult,
     output_dir: str | Path,
     *,
     forbidden_roots: Sequence[str | Path] = (),
 ) -> ReportPaths:
+    if isinstance(bundle, PipelineResult):
+        return _write_compatibility_report_bundle(bundle, output_dir)
     if not isinstance(bundle, ReportBundle):
         raise ReportingError("bundle must be a ReportBundle.")
     root = Path(output_dir).expanduser().resolve()
@@ -202,6 +219,198 @@ def write_report_bundle(
         report_json=report_path,
         report_markdown=markdown_path,
         manifest_json=manifest_path,
+    )
+
+
+def render_markdown(result: PipelineResult) -> str:
+    """Render the base branch's non-final compatibility report."""
+
+    if not isinstance(result, PipelineResult):
+        raise ReportingError("result must be a PipelineResult.")
+    sections = [
+        "# Precision Gate Report",
+        "",
+        _compat_notice(),
+        "",
+        f"- Execution ID: `{result.execution_id}`",
+        f"- Total events: {result.metrics.total_events}",
+        f"- Operational precision: {result.metrics.operational_precision:.2%}",
+        f"- Custody integrity: {result.metrics.custody_integrity_rate:.2%}",
+        f"- Release safety: {result.metrics.release_safety_rate:.2%}",
+        "",
+        _compat_event_section(
+            "Supported",
+            result.events,
+            lambda event: event.information_state is InformationState.FACT_SUPPORTED,
+        ),
+        _compat_event_section(
+            "Pending",
+            result.events,
+            lambda event: event.information_state is InformationState.PENDING,
+        ),
+        _compat_event_section(
+            "Blocked",
+            result.events,
+            lambda event: event.information_state is InformationState.BLOCKED,
+        ),
+        _compat_event_section(
+            "Returned for correction",
+            result.events,
+            lambda event: (
+                event.information_state is InformationState.RETURNED_FOR_CORRECTION
+            ),
+        ),
+        _compat_event_section(
+            "AI/API inferences and opinions",
+            result.events,
+            lambda event: event.information_state
+            in {InformationState.API_INFERENCE, InformationState.API_OPINION},
+        ),
+        _compat_event_section(
+            "Human review required",
+            result.events,
+            lambda event: event.requires_human_review,
+        ),
+        "## Alerts",
+        "",
+        *(f"- {alert}" for alert in result.alerts),
+    ]
+    if not result.alerts:
+        sections.append("- No alerts generated.")
+    return "\n".join(sections).rstrip() + "\n"
+
+
+def write_markdown_report(result: PipelineResult, path: str | Path) -> Path:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(render_markdown(result), encoding="utf-8")
+    return target
+
+
+def _write_compatibility_report_bundle(
+    result: PipelineResult,
+    output_dir: str | Path,
+) -> tuple[Path, ...]:
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    renderers: dict[str, Callable[[PipelineResult], str]] = {
+        "precision_summary.md": _compat_summary_report,
+        "precision_custody.md": _compat_custody_report,
+        "precision_supported.md": lambda item: _compat_single_section_report(
+            item,
+            "Supported",
+            lambda event: event.information_state is InformationState.FACT_SUPPORTED,
+        ),
+        "precision_pending.md": lambda item: _compat_single_section_report(
+            item,
+            "Pending",
+            lambda event: event.information_state is InformationState.PENDING,
+        ),
+        "precision_blocked.md": lambda item: _compat_single_section_report(
+            item,
+            "Blocked",
+            lambda event: event.information_state is InformationState.BLOCKED,
+        ),
+        "precision_returned.md": lambda item: _compat_single_section_report(
+            item,
+            "Returned for correction",
+            lambda event: (
+                event.information_state is InformationState.RETURNED_FOR_CORRECTION
+            ),
+        ),
+        "precision_inferred.md": lambda item: _compat_single_section_report(
+            item,
+            "AI/API inferences and opinions",
+            lambda event: event.information_state
+            in {InformationState.API_INFERENCE, InformationState.API_OPINION},
+        ),
+        "precision_human_review.md": lambda item: _compat_single_section_report(
+            item,
+            "Human review required",
+            lambda event: event.requires_human_review,
+        ),
+    }
+    paths: list[Path] = []
+    for filename in REPORT_FILENAMES:
+        path = directory / filename
+        path.write_text(renderers[filename](result), encoding="utf-8")
+        paths.append(path)
+    return tuple(paths)
+
+
+def _compat_summary_report(result: PipelineResult) -> str:
+    return (
+        "# Precision Gate Summary\n\n"
+        f"{_compat_notice()}\n\n"
+        f"- Execution ID: `{result.execution_id}`\n"
+        f"- Total events: {result.metrics.total_events}\n"
+        f"- Supported: {result.metrics.supported}\n"
+        f"- Pending: {result.metrics.pending}\n"
+        f"- Blocked: {result.metrics.blocked}\n"
+        f"- Returned: {result.metrics.returned}\n"
+        f"- Inferred/opinion: {result.metrics.inferred}\n"
+        f"- Human review required: {result.metrics.human_review_required}\n"
+        f"- Operational precision: {result.metrics.operational_precision:.2%}\n"
+        f"- Custody integrity: {result.metrics.custody_integrity_rate:.2%}\n"
+        f"- Release safety: {result.metrics.release_safety_rate:.2%}\n"
+    )
+
+
+def _compat_custody_report(result: PipelineResult) -> str:
+    lines = ["# Precision Gate Custody", "", _compat_notice(), ""]
+    for event in result.events:
+        lines.extend(
+            [
+                f"## `{event.event_id}`",
+                "",
+                f"- Information state: `{event.information_state.value}`",
+                f"- Custody state: `{event.custody_state.value}`",
+                f"- SHA-256: `{event.sha256 or 'not provided'}`",
+                f"- Support references: {', '.join(event.support_refs) or 'none'}",
+                "",
+            ]
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _compat_single_section_report(
+    result: PipelineResult,
+    title: str,
+    predicate: Callable[[PrecisionEvent], bool],
+) -> str:
+    return (
+        f"# Precision Gate - {title}\n\n"
+        f"{_compat_notice()}\n\n"
+        f"{_compat_event_section(title, result.events, predicate)}"
+    )
+
+
+def _compat_event_section(
+    title: str,
+    events: tuple[PrecisionEvent, ...],
+    predicate: Callable[[PrecisionEvent], bool],
+) -> str:
+    selected = [event for event in events if predicate(event)]
+    lines = [f"## {title}", ""]
+    if not selected:
+        return "\n".join([*lines, "- None.", ""])
+    for event in selected:
+        lines.extend(
+            [
+                f"- **{event.event_id}** - {event.summary}",
+                f"  - state: `{event.information_state.value}`",
+                f"  - custody: `{event.custody_state.value}`",
+                f"  - support: {', '.join(event.support_refs) or 'none'}",
+            ]
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _compat_notice() -> str:
+    return (
+        "> Derived analytical artifact. This report does not modify, replace, or "
+        "become part of the original evidence. Final authority remains human."
     )
 
 

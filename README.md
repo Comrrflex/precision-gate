@@ -95,6 +95,19 @@ Each product remains independently governed.
 | `reporting.py` | Final consolidated JSON/Markdown report and manifest |
 | `metrics.py` | Labeled-case operational validation metrics |
 
+## Quick start
+
+```bash
+python -m pip install -e ".[dev]"
+python examples/run_precision_gate.py
+```
+
+The example uses synthetic data only and writes derived Markdown views to `outputs/`.
+`PrecisionPipeline` is a compatibility API for classification-only orchestration. It
+cannot finalize or release an output. Consequential workflows must use
+`PrecisionGatePipeline`, including its Quinta decision, human review, custody, coherence,
+and finalization stages.
+
 ## Release semantics
 
 `released` means that an output is eligible for delivery to the responsible human or
