@@ -34,9 +34,9 @@ The flow continues, but the state travels with the information.
 information item
   -> source state
   -> TCRIA state
-  -> API state
   -> Quinta Ordem state
   -> Precision Gate state
+  -> optional API-derived view
   -> human-review state
 ```
 
@@ -99,7 +99,7 @@ src/precision_gate/
 ├── custody_state.py       # mobile information states
 ├── tcria_adapter.py       # TCRIA bundle/contracts -> Precision events
 ├── api_output_adapter.py  # API response output -> Precision events
-├── quinta_adapter.py      # Precision events -> Quinta Ordem ExecutionContext
+├── quinta_adapter.py      # Quinta Ordem decision -> Precision events
 ├── pipeline.py            # orchestration without taking final decision
 ├── metrics.py             # operational precision and release-safety metrics
 └── reporting.py           # final audit/reference report

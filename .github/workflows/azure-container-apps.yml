@@ -1,0 +1,46 @@
+name: Deploy Precision to Azure Container Apps
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "Dockerfile.api"
+      - "pyproject.toml"
+      - "src/**"
+      - ".github/workflows/azure-container-apps.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    if: ${{ vars.AZURE_DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to Azure with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Build and push image
+        env:
+          REGISTRY: ${{ vars.AZURE_CONTAINER_REGISTRY }}
+        run: |
+          az acr login --name "$REGISTRY"
+          docker build --file Dockerfile.api --tag "$REGISTRY.azurecr.io/precision-gate:${GITHUB_SHA}" .
+          docker push "$REGISTRY.azurecr.io/precision-gate:${GITHUB_SHA}"
+      - name: Publish Container App revision
+        env:
+          REGISTRY: ${{ vars.AZURE_CONTAINER_REGISTRY }}
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          CONTAINER_APP: ${{ vars.AZURE_CONTAINER_APP_NAME }}
+        run: |
+          az containerapp update \
+            --name "$CONTAINER_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$REGISTRY.azurecr.io/precision-gate:${GITHUB_SHA}"

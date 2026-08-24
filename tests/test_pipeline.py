@@ -1,3 +1,5 @@
+from dataclasses import asdict, replace
+
 from precision_gate.custody_state import InformationState
 from precision_gate.pipeline import PrecisionPipeline
 
@@ -84,3 +86,54 @@ def test_precision_does_not_build_a_quinta_input_from_precision_events() -> None
     assert result.upstream_context["flow"] == "tcria->quinta_ordem->precision"
     assert "evidence" not in result.upstream_context
     assert "gate_results" not in result.upstream_context
+
+
+def test_upstream_context_is_detached_from_caller_mutation() -> None:
+    bundle = {
+        "accusation_set": [],
+        "non_accusation_set": [{"file_name": "case.md", "details": {"value": 1}}],
+    }
+    decision = {
+        "execution_id": "case-3",
+        "status": "approved",
+        "findings": [],
+        "details": {"value": 1},
+    }
+    result = PrecisionPipeline().run(
+        execution_id="case-3",
+        tcria_bundle=bundle,
+        quinta_decision=decision,
+    )
+
+    bundle["non_accusation_set"][0]["details"]["value"] = 9
+    decision["details"]["value"] = 9
+
+    source_record = result.upstream_context["tcria_bundle"]["non_accusation_set"][0]
+    assert source_record["details"]["value"] == 1
+    assert result.upstream_context["quinta_decision"]["details"]["value"] == 1
+
+
+def test_missing_quinta_is_explicitly_incomplete() -> None:
+    result = PrecisionPipeline().run(
+        execution_id="case-4",
+        tcria_bundle={
+            "accusation_set": [],
+            "non_accusation_set": [{"file_name": "case.md", "classification": "signal"}],
+        },
+    )
+
+    assert result.upstream_context["flow"] == "tcria->precision"
+    assert result.upstream_context["flow_complete"] is False
+
+
+def test_legacy_dataclass_field_remains_constructible_and_serializable() -> None:
+    result = PrecisionPipeline().run(
+        execution_id="case-5",
+        tcria_bundle={
+            "accusation_set": [],
+            "non_accusation_set": [{"file_name": "case.md", "classification": "signal"}],
+        },
+    )
+
+    assert "execution_context" in asdict(result)
+    assert replace(result, execution_context=result.execution_context) == result
