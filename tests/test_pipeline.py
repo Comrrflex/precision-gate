@@ -2,7 +2,7 @@ from precision_gate.custody_state import InformationState
 from precision_gate.pipeline import PrecisionPipeline
 
 
-def test_pipeline_composes_tcria_api_and_quinta_without_deciding() -> None:
+def test_pipeline_composes_tcria_quinta_and_api_without_deciding() -> None:
     result = PrecisionPipeline().run(
         execution_id="case-1",
         tcria_bundle={
@@ -19,14 +19,6 @@ def test_pipeline_composes_tcria_api_and_quinta_without_deciding() -> None:
                 }
             ],
         },
-        api_outputs=[
-            {
-                "output_id": "api-1",
-                "content": "Possible synthesis.",
-                "kind": "synthesis",
-                "support_refs": ["EVD-1"],
-            }
-        ],
         quinta_decision={
             "execution_id": "case-1",
             "status": "conditional",
@@ -46,12 +38,35 @@ def test_pipeline_composes_tcria_api_and_quinta_without_deciding() -> None:
             "remaining_uncertainties": ["open-1"],
             "human_review_required": True,
         },
+        api_outputs=[
+            {
+                "output_id": "api-1",
+                "content": "Possible synthesis.",
+                "kind": "synthesis",
+                "support_refs": ["EVD-1"],
+            }
+        ],
     )
 
     states = {event.information_state for event in result.events}
     assert InformationState.FACT_SUPPORTED in states
     assert InformationState.API_INFERENCE in states
     assert InformationState.HUMAN_REVIEW_REQUIRED in states
-    assert result.execution_context["execution_id"] == "case-1"
+    assert result.upstream_context["execution_id"] == "case-1"
+    assert result.upstream_context["flow"] == "tcria->quinta_ordem->precision"
+    assert result.upstream_context["quinta_decision"]["status"] == "conditional"
+    assert result.execution_context is result.upstream_context
     assert result.metrics.human_review_required >= 1
     assert any("human review" in alert for alert in result.alerts)
+
+
+def test_precision_does_not_build_a_quinta_input_from_precision_events() -> None:
+    result = PrecisionPipeline().run(
+        execution_id="case-2",
+        tcria_bundle={"accusation_set": [], "non_accusation_set": []},
+        quinta_decision={"execution_id": "case-2", "status": "pass", "findings": []},
+    )
+
+    assert result.upstream_context["flow"] == "tcria->quinta_ordem->precision"
+    assert "evidence" not in result.upstream_context
+    assert "gate_results" not in result.upstream_context
