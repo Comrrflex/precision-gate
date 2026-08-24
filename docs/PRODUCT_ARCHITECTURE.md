@@ -30,6 +30,11 @@ The flow does not stop merely because a layer returns null, warning, opinion, hy
 
 The flow continues, but the state travels with the information.
 
+The Azure infrastructure definition is owned here by Precision Gate under `infra/`. It creates
+one shared Container Apps environment and exactly three independently deployable services in the
+authoritative order `TCRIA -> Quinta Ordem -> Precision`. The deployment starts at zero replicas
+and the production workflow is manual and OIDC-authenticated.
+
 ```text
 information item
   -> source state
