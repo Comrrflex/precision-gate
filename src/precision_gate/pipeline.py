@@ -7,7 +7,7 @@ from typing import Any
 from precision_gate.api_output_adapter import adapt_api_outputs
 from precision_gate.custody_state import CustodyState, InformationState, PrecisionEvent
 from precision_gate.metrics import PrecisionMetrics, calculate_metrics
-from precision_gate.quinta_adapter import adapt_gate_decision, build_execution_context_payload
+from precision_gate.quinta_adapter import adapt_gate_decision
 from precision_gate.tcria_adapter import adapt_tcria_bundle
 
 
@@ -15,40 +15,51 @@ from precision_gate.tcria_adapter import adapt_tcria_bundle
 class PipelineResult:
     execution_id: str
     events: tuple[PrecisionEvent, ...]
-    execution_context: dict[str, Any]
+    upstream_context: dict[str, Any]
     metrics: PrecisionMetrics
     alerts: tuple[str, ...]
 
+    @property
+    def execution_context(self) -> dict[str, Any]:
+        """Backward-compatible alias for callers that used the old field name."""
+        return self.upstream_context
+
 
 class PrecisionPipeline:
-    """Orchestrate the trail without making the final human decision."""
+    """Consume the accumulated TCRIA -> Quinta Ordem trail without rewriting it."""
 
     def run(
         self,
         *,
         execution_id: str,
         tcria_bundle: Mapping[str, Any],
-        api_outputs: Sequence[Mapping[str, Any]] = (),
         quinta_decision: Mapping[str, Any] | None = None,
+        api_outputs: Sequence[Mapping[str, Any]] = (),
     ) -> PipelineResult:
         tcria_events = adapt_tcria_bundle(tcria_bundle)
-        api_events = adapt_api_outputs(api_outputs)
-        pre_gate_events = (*tcria_events, *api_events)
-        execution_context = build_execution_context_payload(
-            pre_gate_events,
-            execution_id=execution_id,
-            metadata={"source": "precision_gate_pipeline"},
-        )
         quinta_events = adapt_gate_decision(quinta_decision) if quinta_decision else ()
-        events = (*pre_gate_events, *quinta_events)
+        api_events = adapt_api_outputs(api_outputs)
+
+        # Authoritative order: TCRIA -> Quinta Ordem -> Precision.
+        # Precision consumes both upstream products and adds its own derived view.
+        # It does not construct a new Quinta Ordem input from Precision events.
+        events = (*tcria_events, *quinta_events, *api_events)
 
         for event in events:
             event.assert_safe_promotion()
 
+        upstream_context = {
+            "execution_id": execution_id,
+            "flow": "tcria->quinta_ordem->precision",
+            "tcria_bundle": dict(tcria_bundle),
+            "quinta_decision": dict(quinta_decision) if quinta_decision else None,
+            "api_output_count": len(api_outputs),
+        }
+
         return PipelineResult(
             execution_id=execution_id,
             events=events,
-            execution_context=execution_context,
+            upstream_context=upstream_context,
             metrics=calculate_metrics(events),
             alerts=_alerts(events),
         )
