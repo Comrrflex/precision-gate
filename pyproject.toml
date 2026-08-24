@@ -9,6 +9,9 @@ description = "Mobile custody and operational precision layer for TCRIA and Quin
 requires-python = ">=3.11"
 dependencies = []
 
+[project.scripts]
+precision-gate = "precision_gate.cli:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
