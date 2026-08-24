@@ -12,7 +12,12 @@ from precision_gate.quinta_adapter import (
     build_execution_context_payload,
     to_quinta_execution_context,
 )
-from precision_gate.reporting import render_markdown, write_markdown_report, write_report_bundle
+from precision_gate.reporting import (
+    render_markdown,
+    render_report_bundle,
+    write_markdown_report,
+    write_report_bundle,
+)
 from precision_gate.tcria_adapter import adapt_tcria_bundle
 
 __all__ = [
@@ -29,6 +34,7 @@ __all__ = [
     "build_execution_context_payload",
     "calculate_metrics",
     "render_markdown",
+    "render_report_bundle",
     "to_quinta_execution_context",
     "write_markdown_report",
     "write_report_bundle",

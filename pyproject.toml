@@ -14,6 +14,7 @@ precision-gate = "precision_gate.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+api = ["fastapi>=0.110,<1", "uvicorn[standard]>=0.27,<1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

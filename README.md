@@ -91,7 +91,14 @@ result = PrecisionPipeline().run(
     execution_id="case-001",
     tcria_bundle={
         "accusation_set": [],
-        "non_accusation_set": [],
+        "non_accusation_set": [
+            {
+                "file_name": "case.md",
+                "sha256": "0" * 64,
+                "extraction_status": "ok",
+                "classification": "signal",
+            }
+        ],
     },
     quinta_decision={
         "execution_id": "case-001",
@@ -105,7 +112,9 @@ result = PrecisionPipeline().run(
 write_report_bundle(result, "outputs")
 ```
 
-`result.upstream_context` preserves the execution identity, authoritative flow marker, TCRIA bundle, Quinta decision, and API output count. The legacy `result.execution_context` attribute remains as a compatibility alias.
+`result.execution_context` preserves the versioned dataclass contract. The preferred
+`result.upstream_context` read alias exposes the same detached snapshot. A run is marked as the
+authoritative flow only when a matching Quinta Ordem decision is present.
 
 ## Package
 
