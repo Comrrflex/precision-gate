@@ -63,8 +63,22 @@ def test_pipeline_composes_tcria_quinta_and_api_without_deciding() -> None:
 def test_precision_does_not_build_a_quinta_input_from_precision_events() -> None:
     result = PrecisionPipeline().run(
         execution_id="case-2",
-        tcria_bundle={"accusation_set": [], "non_accusation_set": []},
-        quinta_decision={"execution_id": "case-2", "status": "pass", "findings": []},
+        tcria_bundle={
+            "accusation_set": [],
+            "non_accusation_set": [
+                {
+                    "file_name": "case.md",
+                    "sha256": "2" * 64,
+                    "extraction_status": "ok",
+                    "classification": "signal",
+                }
+            ],
+        },
+        quinta_decision={
+            "execution_id": "case-2",
+            "status": "approved",
+            "findings": [],
+        },
     )
 
     assert result.upstream_context["flow"] == "tcria->quinta_ordem->precision"

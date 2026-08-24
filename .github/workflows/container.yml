@@ -1,0 +1,31 @@
+name: Container
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - pyproject.toml
+      - "src/**"
+      - ".github/workflows/container.yml"
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - pyproject.toml
+      - "src/**"
+      - ".github/workflows/container.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build --tag precision-gate:${{ github.sha }} .
+      - name: Check entrypoint
+        run: docker run --rm --network none precision-gate:${{ github.sha }} --help
