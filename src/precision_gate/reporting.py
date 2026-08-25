@@ -86,6 +86,18 @@ def write_report_bundle(result: PipelineResult, output_dir: str | Path) -> tuple
 
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
+    rendered = render_report_bundle(result)
+    paths: list[Path] = []
+    for filename in REPORT_FILENAMES:
+        path = directory / filename
+        path.write_text(rendered[filename], encoding="utf-8")
+        paths.append(path)
+    return tuple(paths)
+
+
+def render_report_bundle(result: PipelineResult) -> dict[str, str]:
+    """Render the eight native Markdown views without writing upstream data to disk."""
+
     renderers: dict[str, Callable[[PipelineResult], str]] = {
         "precision_summary.md": _summary_report,
         "precision_custody.md": _custody_report,
@@ -121,12 +133,7 @@ def write_report_bundle(result: PipelineResult, output_dir: str | Path) -> tuple
             lambda event: event.requires_human_review,
         ),
     }
-    paths: list[Path] = []
-    for filename in REPORT_FILENAMES:
-        path = directory / filename
-        path.write_text(renderers[filename](result), encoding="utf-8")
-        paths.append(path)
-    return tuple(paths)
+    return {filename: renderers[filename](result) for filename in REPORT_FILENAMES}
 
 
 def _summary_report(result: PipelineResult) -> str:

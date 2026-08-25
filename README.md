@@ -62,6 +62,28 @@ TCRIA -> Quinta Ordem -> Precision
 
 ## Precision pipeline
 
+### Container command
+
+The image runs Precision only after receiving the native TCRIA bundle and Quinta Ordem decision
+as read-only inputs:
+
+```bash
+docker build -t precision-gate .
+docker run --rm --network none \
+  -v "$PWD/upstream:/workspace/upstream:ro" \
+  -v "$PWD/output:/workspace/output" \
+  precision-gate \
+  --execution-id case-001 \
+  --tcria /workspace/upstream/tcria.json \
+  --quinta /workspace/upstream/case-001_quinta_ordem.json \
+  --output /workspace/output
+```
+
+The command rejects cross-case input when the Quinta Ordem `execution_id` differs and rejects a
+TCRIA bundle whose canonical SHA-256 identity differs from the one evaluated by Quinta Ordem. It
+writes the eight native Markdown views plus a Markdown SHA-256 manifest. Full multi-product
+composition is owned by the TCRIA repository; Precision remains independently executable.
+
 ```python
 from precision_gate import PrecisionPipeline, write_report_bundle
 
@@ -69,7 +91,14 @@ result = PrecisionPipeline().run(
     execution_id="case-001",
     tcria_bundle={
         "accusation_set": [],
-        "non_accusation_set": [],
+        "non_accusation_set": [
+            {
+                "file_name": "case.md",
+                "sha256": "0" * 64,
+                "extraction_status": "ok",
+                "classification": "signal",
+            }
+        ],
     },
     quinta_decision={
         "execution_id": "case-001",
@@ -83,7 +112,9 @@ result = PrecisionPipeline().run(
 write_report_bundle(result, "outputs")
 ```
 
-`result.upstream_context` preserves the execution identity, authoritative flow marker, TCRIA bundle, Quinta decision, and API output count. The legacy `result.execution_context` attribute remains as a compatibility alias.
+`result.execution_context` preserves the versioned dataclass contract. The preferred
+`result.upstream_context` read alias exposes the same detached snapshot. A run is marked as the
+authoritative flow only when a matching Quinta Ordem decision is present.
 
 ## Package
 

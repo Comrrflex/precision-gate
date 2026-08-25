@@ -1,0 +1,44 @@
+name: Container
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - Dockerfile.api
+      - .dockerignore
+      - pyproject.toml
+      - "src/**"
+      - ".github/workflows/container.yml"
+  pull_request:
+    paths:
+      - Dockerfile
+      - Dockerfile.api
+      - .dockerignore
+      - pyproject.toml
+      - "src/**"
+      - ".github/workflows/container.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build --tag precision-gate:${{ github.sha }} .
+      - name: Check entrypoint
+        run: docker run --rm --network none precision-gate:${{ github.sha }} --help
+      - name: Build API image
+        run: docker build --file Dockerfile.api --tag precision-gate-api:${{ github.sha }} .
+      - name: Check API health endpoint
+        run: |
+          docker run --detach --name precision-api --publish 8000:8000 precision-gate-api:${{ github.sha }}
+          for attempt in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:8000/health; then exit 0; fi
+            sleep 1
+          done
+          docker logs precision-api
+          exit 1
