@@ -42,6 +42,7 @@ The repository contains:
 - external AI/API output adapter;
 - orchestration that consumes the upstream TCRIA + Quinta trail;
 - transparent operational metrics;
+- a deterministic, tamper-evident JSON audit record;
 - consolidated Markdown reporting;
 - eight derived Markdown report views;
 - automated tests and CI.
@@ -81,8 +82,10 @@ docker run --rm --network none \
 
 The command rejects cross-case input when the Quinta Ordem `execution_id` differs and rejects a
 TCRIA bundle whose canonical SHA-256 identity differs from the one evaluated by Quinta Ordem. It
-writes the eight native Markdown views plus a Markdown SHA-256 manifest. Full multi-product
-composition is owned by the TCRIA repository; Precision remains independently executable.
+writes the eight native Markdown views, a Markdown SHA-256 manifest, and
+`precision_audit.json`. The JSON artifact binds upstream input hashes, metrics, alerts, and
+ordered events into a verifiable SHA-256 hash chain. Full multi-product composition is owned by
+the TCRIA repository; Precision remains independently executable.
 
 ```python
 from precision_gate import PrecisionPipeline, write_report_bundle
