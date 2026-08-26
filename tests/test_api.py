@@ -1,6 +1,7 @@
 from fastapi import HTTPException
 
 from precision_gate.api import PrecisionRunRequest, health, run_precision
+from precision_gate.audit import verify_audit_record
 
 
 def _bundle() -> dict[str, object]:
@@ -47,3 +48,4 @@ def test_run_returns_eight_markdown_reports() -> None:
 
     assert response["flow"] == "tcria->quinta_ordem->precision"
     assert len(response["markdown_reports"]) == 8
+    assert verify_audit_record(response["audit_record"])

@@ -69,6 +69,9 @@ def test_run_inputs_writes_eight_views_and_markdown_manifest(tmp_path: Path) -> 
     manifest = Path(result["manifest"])
     assert manifest.exists()
     assert "precision_summary.md" in manifest.read_text(encoding="utf-8")
+    audit_record = Path(result["audit_record"])
+    assert audit_record.exists()
+    assert json.loads(audit_record.read_text(encoding="utf-8"))["record_sha256"]
 
 
 def test_run_inputs_rejects_cross_case_mixing(tmp_path: Path) -> None:

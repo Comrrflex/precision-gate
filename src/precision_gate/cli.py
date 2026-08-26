@@ -7,6 +7,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from precision_gate.audit import write_audit_record
 from precision_gate.pipeline import PrecisionPipeline
 from precision_gate.reporting import write_report_bundle
 
@@ -36,11 +37,13 @@ def run_inputs(
         quinta_decision=quinta_decision,
     )
     paths = write_report_bundle(result, output_dir)
+    audit_record = write_audit_record(result, Path(output_dir) / "precision_audit.json")
     manifest = _write_markdown_manifest(execution_id, paths, Path(output_dir))
     return {
         "execution_id": result.execution_id,
         "report_count": len(paths),
         "manifest": str(manifest),
+        "audit_record": str(audit_record),
         "alerts": len(result.alerts),
     }
 
