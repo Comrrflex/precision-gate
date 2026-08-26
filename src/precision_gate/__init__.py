@@ -4,6 +4,7 @@ Mobile custody and operational precision layer for TCRIA + Quinta Ordem Gate.
 """
 
 from precision_gate.api_output_adapter import adapt_api_output, adapt_api_outputs
+from precision_gate.audit import build_audit_record, verify_audit_record, write_audit_record
 from precision_gate.custody_state import CustodyState, InformationState, PrecisionEvent
 from precision_gate.metrics import PrecisionMetrics, calculate_metrics
 from precision_gate.pipeline import PipelineResult, PrecisionPipeline
@@ -32,10 +33,13 @@ __all__ = [
     "adapt_gate_decision",
     "adapt_tcria_bundle",
     "build_execution_context_payload",
+    "build_audit_record",
     "calculate_metrics",
     "render_markdown",
     "render_report_bundle",
     "to_quinta_execution_context",
+    "verify_audit_record",
+    "write_audit_record",
     "write_markdown_report",
     "write_report_bundle",
 ]

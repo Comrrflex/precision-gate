@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from precision_gate.audit import build_audit_record
 from precision_gate.pipeline import PrecisionPipeline
 from precision_gate.reporting import render_report_bundle
 
@@ -53,5 +54,6 @@ def run_precision(payload: PrecisionRunRequest) -> dict[str, object]:
         "execution_id": result.execution_id,
         "flow": result.upstream_context["flow"],
         "alerts": list(result.alerts),
+        "audit_record": build_audit_record(result),
         "markdown_reports": render_report_bundle(result),
     }
