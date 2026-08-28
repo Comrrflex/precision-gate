@@ -190,7 +190,7 @@ Precision Gate informs, classifies, alerts, measures, and preserves custody. It 
 
 ## Integration sources
 
-- TCRIA base: `batt1984rodrigo-del/tcria-09215b00`
+- TCRIA base: `Comrrflex/tcria-09215b00-main`
 - Quinta Ordem base: `comreflex/Fifth-order/tree/main/quinta-ordem-gate`
 
 ## Next validation work
