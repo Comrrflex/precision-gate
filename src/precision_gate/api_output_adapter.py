@@ -16,7 +16,14 @@ class APIOutputAdapterError(ValueError):
 
 
 def adapt_api_output(payload: Mapping[str, Any]) -> PrecisionEvent:
-    """Convert one external AI/API output into a classified Precision event."""
+    """Convert one external AI/API output into a classified Precision event.
+
+    The adapter verifies an HMAC signature before trusting identifier-like fields.
+    The transport layer should pass signature information in headers; when using
+    this function directly, include the header as the field `signature_header`
+    (e.g. "HMAC keyid:hex" or "keyid:hex"). Legacy payload signatures in
+    `signature_hmac` or `hmac` are still supported.
+    """
 
     if not isinstance(payload, Mapping):
         raise APIOutputAdapterError("API output must be a mapping.")
@@ -66,33 +73,108 @@ def adapt_api_outputs(payloads: Sequence[Mapping[str, Any]]) -> tuple[PrecisionE
     return tuple(adapt_api_output(payload) for payload in payloads)
 
 
-def _verify_hmac_signature(payload: dict[str, Any]) -> None:
-    """Verify an HMAC-SHA256 signature on the payload.
+# --- HMAC verification helpers -------------------------------------------------
 
-    Expects the upstream sender to include a hex HMAC in the field
-    "signature_hmac" (or "hmac"). The HMAC is computed over the canonical
-    JSON representation (sorted keys, compact separators) of the payload with
-    the signature fields removed unless a `signed_body` field is explicitly
-    provided.
 
-    The shared secret must be available in the PRECISION_GATE_HMAC_SECRET
-    environment variable.
+def _load_hmac_secrets() -> dict[str, str]:
+    """Load HMAC secrets from environment.
+
+    Preferred: PRECISION_GATE_HMAC_SECRETS contains a JSON object mapping key ids
+    to secrets, e.g. '{"k1":"secret1","k2":"secret2"}'. Fallback: a
+    single PRECISION_GATE_HMAC_SECRET environment variable is treated as the
+    default secret with key id "default".
     """
 
+    raw = os.environ.get("PRECISION_GATE_HMAC_SECRETS")
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict):
+                raise ValueError("PRECISION_GATE_HMAC_SECRETS must be a JSON object mapping key ids to secrets")
+            return {str(k): str(v) for k, v in parsed.items()}
+        except Exception:
+            raise APIOutputAdapterError("Invalid PRECISION_GATE_HMAC_SECRETS configuration")
+
+    secret = os.environ.get("PRECISION_GATE_HMAC_SECRET")
+    if secret:
+        return {"default": secret}
+
+    raise APIOutputAdapterError("HMAC secret not configured (PRECISION_GATE_HMAC_SECRETS or PRECISION_GATE_HMAC_SECRET required).")
+
+
+def _parse_signature_from_payload(payload: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Extract (keyid, signature) from the payload or header-like fields.
+
+    Supported forms (in order):
+    - legacy fields: signature_hmac or hmac (no key id)
+    - separate fields: signature_keyid and signature (or signature_hex)
+    - header field: signature_header or x_signature_hmac with formats:
+        "keyid:hex" or "HMAC keyid:hex"
+    """
+
+    # legacy hex signature without key id
     sig = _optional_string(payload.get("signature_hmac") or payload.get("hmac"))
+    if sig:
+        return None, sig
+
+    # explicit keyid + signature fields
+    keyid = _optional_string(payload.get("signature_keyid") or payload.get("signature_key"))
+    sig = _optional_string(payload.get("signature") or payload.get("signature_hex"))
+    if sig:
+        return keyid, sig
+
+    # header-like single field
+    header = _optional_string(
+        payload.get("signature_header")
+        or payload.get("x_signature_hmac")
+        or payload.get("x-signature-hmac")
+    )
+    if header:
+        # allow optional leading algorithm token
+        if header.lower().startswith("hmac "):
+            header = header[5:]
+        if ":" in header:
+            k, s = header.split(":", 1)
+            return k.strip() or None, s.strip()
+        # if no keyid is present, treat header value as signature
+        return None, header.strip()
+
+    return None, None
+
+
+def _verify_hmac_signature(payload: dict[str, Any]) -> None:
+    """Verify an HMAC-SHA256 signature on the payload with key-id support.
+
+    The canonical representation is the JSON serialization with sorted keys and
+    compact separators. If `signed_body` is provided it is canonicalized and
+    used directly; otherwise the payload is copied and any signature fields are
+    removed before canonicalization.
+    """
+
+    keyid, sig = _parse_signature_from_payload(payload)
     if not sig:
         raise APIOutputAdapterError("Missing signature_hmac.")
 
-    secret = os.environ.get("PRECISION_GATE_HMAC_SECRET")
-    if not secret:
-        raise APIOutputAdapterError("HMAC secret not configured (PRECISION_GATE_HMAC_SECRET).")
+    secrets = _load_hmac_secrets()
+
+    # choose secret
+    if keyid:
+        secret = secrets.get(keyid)
+        if secret is None:
+            raise APIOutputAdapterError("Unknown signature key id.")
+    else:
+        # no key id supplied: only allowed when exactly one secret configured
+        if len(secrets) == 1:
+            secret = next(iter(secrets.values()))
+        else:
+            raise APIOutputAdapterError("Signature key id required when multiple keys are configured.")
 
     signed = payload.get("signed_body")
     if signed is None:
         signed = dict(payload)
-        # remove signature fields before canonicalizing
-        signed.pop("signature_hmac", None)
-        signed.pop("hmac", None)
+        # remove any signature/header fields prior to canonicalizing
+        for f in ("signature_hmac", "hmac", "signature_header", "x_signature_hmac", "x-signature-hmac", "signature", "signature_hex", "signature_keyid", "signature_key"):
+            signed.pop(f, None)
 
     try:
         canonical = json.dumps(signed, sort_keys=True, separators=(",", ":"), default=str)
@@ -102,6 +184,9 @@ def _verify_hmac_signature(payload: dict[str, Any]) -> None:
     expected = hmac.new(secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, sig):
         raise APIOutputAdapterError("Invalid signature_hmac.")
+
+
+# -----------------------------------------------------------------------------
 
 
 def _identifier(payload: dict[str, Any]) -> str:
