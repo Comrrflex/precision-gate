@@ -44,10 +44,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 42Crunch REST API Static Security Testing
-        uses: 42Crunch/api-security-audit-action@fc01ea7a89e6268875868f9d89598af7a9899ae0
+      - uses: actions/setup-python@v5
         with:
-          # Please create free account at https://platform.42crunch.com/register
+          python-version: "3.11"
+
+      - name: Install API dependencies
+        run: python -m pip install -e ".[api]"
+
+      - name: Export API contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from precision_gate.api import app
+
+          schema = app.openapi()
+          assert "/run" in schema["paths"]
+          Path("openapi.json").write_text(
+              json.dumps(schema, indent=2) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: 42Crunch REST API Static Security Testing
+        uses: 42Crunch/api-security-audit-action@c675c3d41a7932c89d166717572e5c243afaa54d # v4
+        with:
+          # Account and token must belong to the configured 42Crunch platform.
           # Follow these steps to configure API_TOKEN https://docs.42crunch.com/latest/content/tasks/integrate_github_actions.htm
           api-token: ${{ secrets.API_TOKEN }}
           # Fail if any OpenAPI file scores lower than 75
