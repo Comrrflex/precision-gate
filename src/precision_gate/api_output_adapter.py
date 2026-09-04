@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+import os
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any
-import json
-import hmac
-import os
-import hashlib
 
 from precision_gate.custody_state import CustodyState, InformationState, PrecisionEvent
 
@@ -90,10 +90,10 @@ def _load_hmac_secrets() -> dict[str, str]:
         try:
             parsed = json.loads(raw)
             if not isinstance(parsed, dict):
-                raise ValueError("PRECISION_GATE_HMAC_SECRETS must be a JSON object mapping key ids to secrets")
+                raise TypeError("PRECISION_GATE_HMAC_SECRETS must be a JSON object mapping key ids to secrets")
             return {str(k): str(v) for k, v in parsed.items()}
-        except Exception:
-            raise APIOutputAdapterError("Invalid PRECISION_GATE_HMAC_SECRETS configuration")
+        except (TypeError, ValueError) as exc:
+            raise APIOutputAdapterError("Invalid PRECISION_GATE_HMAC_SECRETS configuration") from exc
 
     secret = os.environ.get("PRECISION_GATE_HMAC_SECRET")
     if secret:
@@ -178,8 +178,8 @@ def _verify_hmac_signature(payload: dict[str, Any]) -> None:
 
     try:
         canonical = json.dumps(signed, sort_keys=True, separators=(",", ":"), default=str)
-    except Exception:
-        raise APIOutputAdapterError("Unable to canonicalize payload for signature verification.")
+    except (TypeError, ValueError) as exc:
+        raise APIOutputAdapterError("Unable to canonicalize payload for signature verification.") from exc
 
     expected = hmac.new(secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, sig):
