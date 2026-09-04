@@ -3,6 +3,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any
+import json
+import hmac
+import os
+import hashlib
 
 from precision_gate.custody_state import CustodyState, InformationState, PrecisionEvent
 
@@ -18,6 +22,9 @@ def adapt_api_output(payload: Mapping[str, Any]) -> PrecisionEvent:
         raise APIOutputAdapterError("API output must be a mapping.")
 
     source = deepcopy(dict(payload))
+    # Verify HMAC signature before trusting identifier-like fields from upstream
+    _verify_hmac_signature(source)
+
     output_id = _identifier(source)
     summary = _summary(source)
     state = _state(source)
@@ -57,6 +64,44 @@ def adapt_api_outputs(payloads: Sequence[Mapping[str, Any]]) -> tuple[PrecisionE
     if isinstance(payloads, (str, bytes)) or not isinstance(payloads, Sequence):
         raise APIOutputAdapterError("API outputs must be a sequence of mappings.")
     return tuple(adapt_api_output(payload) for payload in payloads)
+
+
+def _verify_hmac_signature(payload: dict[str, Any]) -> None:
+    """Verify an HMAC-SHA256 signature on the payload.
+
+    Expects the upstream sender to include a hex HMAC in the field
+    "signature_hmac" (or "hmac"). The HMAC is computed over the canonical
+    JSON representation (sorted keys, compact separators) of the payload with
+    the signature fields removed unless a `signed_body` field is explicitly
+    provided.
+
+    The shared secret must be available in the PRECISION_GATE_HMAC_SECRET
+    environment variable.
+    """
+
+    sig = _optional_string(payload.get("signature_hmac") or payload.get("hmac"))
+    if not sig:
+        raise APIOutputAdapterError("Missing signature_hmac.")
+
+    secret = os.environ.get("PRECISION_GATE_HMAC_SECRET")
+    if not secret:
+        raise APIOutputAdapterError("HMAC secret not configured (PRECISION_GATE_HMAC_SECRET).")
+
+    signed = payload.get("signed_body")
+    if signed is None:
+        signed = dict(payload)
+        # remove signature fields before canonicalizing
+        signed.pop("signature_hmac", None)
+        signed.pop("hmac", None)
+
+    try:
+        canonical = json.dumps(signed, sort_keys=True, separators=(",", ":"), default=str)
+    except Exception:
+        raise APIOutputAdapterError("Unable to canonicalize payload for signature verification.")
+
+    expected = hmac.new(secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        raise APIOutputAdapterError("Invalid signature_hmac.")
 
 
 def _identifier(payload: dict[str, Any]) -> str:
