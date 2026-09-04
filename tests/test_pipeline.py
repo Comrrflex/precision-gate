@@ -4,7 +4,7 @@ from precision_gate.custody_state import InformationState
 from precision_gate.pipeline import PrecisionPipeline
 
 
-def test_pipeline_composes_tcria_quinta_and_api_without_deciding() -> None:
+def test_pipeline_composes_tcria_quinta_and_api_without_deciding(sign_api_output) -> None:
     result = PrecisionPipeline().run(
         execution_id="case-1",
         tcria_bundle={
@@ -41,12 +41,12 @@ def test_pipeline_composes_tcria_quinta_and_api_without_deciding() -> None:
             "human_review_required": True,
         },
         api_outputs=[
-            {
+            sign_api_output({
                 "output_id": "api-1",
                 "content": "Possible synthesis.",
                 "kind": "synthesis",
                 "support_refs": ["EVD-1"],
-            }
+            })
         ],
     )
 
